@@ -48,6 +48,14 @@ const userSchema = new Schema(
       type: Date,
       default: null,
     },
+    passwordResetToken:{
+      type: String,
+      default: null,
+    },
+    passwordResetExpiry:{
+      type: Date,
+      default: null,
+    }
   },
   {
     timestamps: true,
