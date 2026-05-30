@@ -85,7 +85,7 @@ const generateAccessandRefreshToken = async (userId) => {
     await user.save({ validateBeforeSave: false });
     return { accessToken, refreshToken };
   } catch (error) {
-    console.error("Error generating tokens: ", error);
+     console.error("Token generation error:", error.message); 
     throw new ApiError(500, "Failed to generate authentication tokens");
   }
 };
@@ -293,10 +293,57 @@ const resetPassword = asyncHandler(async (req,res) =>{
   
 });
 
+const refreshTokens= asyncHandler(async(req,res)=>{
+  const incomingRefreshToken =
+    req.cookies.refreshToken ||
+    req.body.refreshToken;
+
+
+  if(!incomingRefreshToken){
+    throw new ApiError(400,"Refresh token is required");
+  }
+
+  const decodedToken = jwt.verify(
+    incomingRefreshToken,
+    process.env.REFRESH_TOKEN_SECRET,
+  );
+
+  const user = await User.findById(decodedToken?._id);
+
+  if (!user){
+    throw new ApiError(404,"User not found");
+  }
+
+  if (user.refreshToken !== incomingRefreshToken){
+    throw new ApiError(401,"Invalid refresh token or refresh token is expired");
+  }
+
+  const { accessToken, refreshToken: newRefreshToken } = await generateAccessandRefreshToken(
+    user._id,
+  );
+
+  const options ={
+    httpOnly: true,
+    secure: true,
+  };
+
+  user.refreshToken = newRefreshToken;
+  await user.save();
+
+  return res.
+  status(200).
+  cookie("refreshToken",newRefreshToken,options).
+  cookie("accessToken",accessToken,options).
+  json(new ApiResponse(200,{ accessToken, refreshToken: newRefreshToken },"Tokens refreshed successfully"));
+
+});
+
 export { 
   registerUser, 
   verifyEmail, 
   resendVerificationEmail, 
   loginUser, 
   forgotPassword,
-  resetPassword};
+  resetPassword,
+  refreshTokens
+};

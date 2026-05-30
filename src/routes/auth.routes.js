@@ -5,7 +5,8 @@ import {
     resendVerificationEmail, 
     loginUser, 
     forgotPassword, 
-    resetPassword
+    resetPassword,
+    refreshTokens
 } from "../controllers/auth.controllers.js";
 
 import {
@@ -20,11 +21,12 @@ import { validate } from "../middlewares/validator.middleware.js";
 const router = Router();
 
 // unprotected routes no use of JWT token required
-router.route("/register").post(registerUserValidator, validate, registerUser);
-router.route("/login").post(loginUserValidator, validate, loginUser);
+router.route("/register").post(registerUserValidator(), validate, registerUser);
+router.route("/login").post(loginUserValidator(), validate, loginUser);
 router.route("/verify-email/:verificationToken").get(verifyEmail);
 router.route("/resend-verification-email").post(resendVerificationEmail);
-router.route("/forgot-password").post(userForgotPasswordValidator, validate, forgotPassword);
-router.route("/reset-password/:resetToken").post(userResetPasswordValidator, validate, resetPassword);
+router.route("/forgot-password").post(userForgotPasswordValidator(), validate, forgotPassword);
+router.route("/reset-password/:resetToken").post(userResetPasswordValidator(), validate, resetPassword);
+router.route("/refresh-tokens").post(refreshTokens);
 
 export default router;
