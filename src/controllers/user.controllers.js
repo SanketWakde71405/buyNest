@@ -4,6 +4,7 @@ import {uploadOnCloudinary} from "../utils/cloudinary.js";
 import {User} from "../models/users.models.js";
 import { ApiError } from "../utils/ApiError.js";
 import mongoose from "mongoose";
+import {ROLES} from "../constants.js";
 
 const getCurrentUser = asyncHandler(async (req, res) => {
   return res
@@ -11,15 +12,21 @@ const getCurrentUser = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, req.user, "Current user fetched successfully"));
 });
 
+// ✅ Only allow updating name and role for now 
 const updateUserDetails = asyncHandler(async (req,res) =>{
-    const {name, email} = req.body;
+    const {name, role} = req.body;
 
-    if(!name || !email){
-        return res.status(400).json(new ApiResponse(400, null, "Name and email are required"));
+    if(!name || !role){
+        return res.status(400).json(new ApiResponse(400, null, "Name and role are required"));
     }
+
+    if(!Object.values(ROLES).includes(role)){
+        return res.status(400).json(new ApiResponse(400, null, "Invalid role value"));
+    }
+
     const user = await User.findByIdAndUpdate(
         req.user?._id,
-        { name, email },
+        { name, role },
         { new: true }
     ).select("-password -refreshToken -emailVerificationToken -emailVerificationExpiry -passwordResetToken -passwordResetExpiry");
 
@@ -53,6 +60,7 @@ const updateUserAvatar = asyncHandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, user, "Avatar image updated successfully"));
 });
+
 
 
 export { getCurrentUser, updateUserDetails, updateUserAvatar };

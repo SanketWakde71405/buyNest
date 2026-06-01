@@ -9,9 +9,10 @@ import { upload } from "../middlewares/multer.middleware.js";
 
 const router = Router();
 
-router.route("/me").get(verifyJWT, getCurrentUser);
+router.route("/").get(verifyJWT, getCurrentUser);
 router
-  .route("/me/avatar")
+  .route("/avatar")
   .put(verifyJWT, upload.single("avatar"), updateUserAvatar);
+router.route("/").patch(verifyJWT, updateUserDetails);
 
 export default router;
