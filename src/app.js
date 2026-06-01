@@ -1,6 +1,7 @@
+import dotenv from "dotenv";
+dotenv.config({ path: "./.env" });
 import express from "express";
 import cors from "cors";
-import dotenv from "dotenv";
 import cookieParser from "cookie-parser";
 
 
@@ -23,7 +24,7 @@ app.use(
 
 app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/health", healthCheckRouter);
-app.use("/api/v1/users", userRouter);
+app.use("/api/v1/users/me", userRouter);
 
 
 
