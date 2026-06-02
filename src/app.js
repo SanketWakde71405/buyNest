@@ -9,6 +9,7 @@ import cookieParser from "cookie-parser";
 import authRouter from "./routes/auth.routes.js";
 import healthCheckRouter from "./routes/healthCheck.routes.js";
 import userRouter from "./routes/user.routes.js";
+import addressRouter from "./routes/address.routes.js";
 const app = express();
 
 app.use(express.json({ limit: "16kb" }));
@@ -25,7 +26,7 @@ app.use(
 app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/health", healthCheckRouter);
 app.use("/api/v1/users/me", userRouter);
-
+app.use("/api/v1/users/addresses", addressRouter);
 
 
 export default app;
