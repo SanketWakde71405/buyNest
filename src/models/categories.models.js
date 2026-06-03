@@ -21,10 +21,27 @@ const categorySchema = new Schema(
       ref: "Category",
       default: null,
     },
+    parentCategoryName: {
+      type: String,
+      default: null,
+      trim: true,
+    },
   },
   {
     timestamps: true,
   },
 );
+
+categorySchema.pre("save", async function () {
+  if (this.parentCategory) {
+    const parent = await mongoose
+      .model("Category")
+      .findById(this.parentCategory)
+      .select("name");
+    this.parentCategoryName = parent ? parent.name : null;
+  } else {
+    this.parentCategoryName = null;
+  }
+});
 
 export const Category = mongoose.model("Category", categorySchema);
