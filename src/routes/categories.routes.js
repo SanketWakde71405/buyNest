@@ -11,12 +11,12 @@ import {
 import { verifyJWT } from "../middlewares/auth.middleware.js"
 const router = Router();
 
-router.post('/add-categories',verifyJWT, createCategory);
-router.get('/list-categories',verifyJWT, getCategories);
-router.get('/parent-categories',verifyJWT, getParentCategories);
-router.get('/sub-categories',verifyJWT, getSubCategories);
-router.patch('/:categoryId',verifyJWT, updateCategory);
-router.delete('/:categoryId',verifyJWT, deleteCategory);
-router.get('/:categoryId',verifyJWT, getCategoryById);
+router.route("/add-categories").post(verifyJWT, createCategory);
+router.route("/list-categories").get(verifyJWT, getCategories);
+router.route("/parent-categories").get(verifyJWT, getParentCategories);
+router.route("/sub-categories").get(verifyJWT, getSubCategories);
+router.route("/:categoryId").patch(verifyJWT, updateCategory);
+router.route("/:categoryId").delete(verifyJWT, deleteCategory);
+router.route("/:categoryId").get(verifyJWT, getCategoryById);
 
 export default router;

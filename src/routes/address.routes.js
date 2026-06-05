@@ -11,9 +11,9 @@ import {
 import { verifyJWT } from '../middlewares/auth.middleware.js';
 const router = Router();
 
-router.post("/",verifyJWT,addressValidator(),validate,createAddress);
-router.get("/:userId",getAddresses);
-router.get("/address/:addressId",verifyJWT,getAddressById);
-router.put("/:addressId",verifyJWT,addressValidator(),validate,updateAddress);
-router.delete("/:addressId",verifyJWT,deleteAddress);
+router.route("/").post(verifyJWT, addressValidator(), validate, createAddress);
+router.route("/:userId").get(getAddresses);
+router.route("/address/:addressId").get(verifyJWT, getAddressById);
+router.route("/:addressId").put(verifyJWT, addressValidator(), validate, updateAddress);
+router.route("/:addressId").delete(verifyJWT, deleteAddress);
 export default router;

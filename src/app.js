@@ -11,6 +11,7 @@ import healthCheckRouter from "./routes/healthCheck.routes.js";
 import userRouter from "./routes/user.routes.js";
 import addressRouter from "./routes/address.routes.js";
 import categoriesRouter from "./routes/categories.routes.js";
+import brandsRouter from "./routes/brands.routes.js";
 
 const app = express();
 
@@ -30,6 +31,7 @@ app.use("/api/v1/health", healthCheckRouter);
 app.use("/api/v1/users/me", userRouter);
 app.use("/api/v1/users/addresses", addressRouter);
 app.use("/api/v1/categories", categoriesRouter);
+app.use("/api/v1/brands", brandsRouter);
 
 
 export default app;
