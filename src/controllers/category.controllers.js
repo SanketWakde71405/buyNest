@@ -65,7 +65,9 @@ const getCategories = asyncHandler(async (req,res) =>{
     throw new ApiError(401, "Unauthorized");
   }
 
-  const categories = await Category.find();
+  const categories = await Category.find().select(
+    "-slug -description -parentCategory -createdAt -updatedAt",
+  );
 
   if(!categories){
     throw new ApiError(404, "No categories found");

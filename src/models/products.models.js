@@ -23,6 +23,7 @@ const productSchema = new Schema(
     },
     discountPrice: {
       type: Number,
+      required:true,
     },
     category: {
       type: mongoose.Schema.Types.ObjectId,
@@ -36,6 +37,7 @@ const productSchema = new Schema(
     brand: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Brand",
+      required:true,
     },
     images: [
       {

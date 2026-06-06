@@ -3,6 +3,7 @@ import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { Brand } from "../models/brands.models.js";
 import { Category } from "../models/categories.models.js";
+import { Product } from "../models/products.models.js";
 import { uploadOnCloudinary } from "../utils/cloudinary.js";
 
 const createBrand = asyncHandler(async (req, res) => {
@@ -218,7 +219,7 @@ const addcategoriesToBrand = asyncHandler(async (req, res) => {
   const existingCategories = await Category.find({
     _id: { $in: categoryIds },
   });
-  
+
   if (existingCategories.length !== categoryIds.length) {
     throw new ApiError(400, "One or more category IDs are invalid");
   }
@@ -232,72 +233,76 @@ const addcategoriesToBrand = asyncHandler(async (req, res) => {
   return res
     .status(200)
     .json(
-      new ApiResponse(200, updatedBrand, "Categories added to brand successfully"),
+      new ApiResponse(
+        200,
+        updatedBrand,
+        "Categories added to brand successfully",
+      ),
     );
-
 });
 
 const deleteCategoriesFromBrand = asyncHandler(async (req, res) => {
-    const user = req.user;
+  const user = req.user;
 
-    if (!user) {
-      throw new ApiError(401, "Unauthorized");
-    }
+  if (!user) {
+    throw new ApiError(401, "Unauthorized");
+  }
 
-    const { brandId, categoryIds } = req.body;
+  const { brandId, categoryIds } = req.body;
 
-    if (!brandId || !categoryIds || categoryIds.length === 0) {
-      throw new ApiError(400, "Brand ID and category IDs are required");
-    }
+  if (!brandId || !categoryIds || categoryIds.length === 0) {
+    throw new ApiError(400, "Brand ID and category IDs are required");
+  }
 
-    const brand = await Brand.findById(brandId);
+  const brand = await Brand.findById(brandId);
 
-    if (!brand) {
-      throw new ApiError(404, `Brand with ID ${brandId} not found`);
-    }
+  if (!brand) {
+    throw new ApiError(404, `Brand with ID ${brandId} not found`);
+  }
 
-    const updatedBrand = await Brand.findByIdAndUpdate(
-      brandId,
-      { $pull: { categories: { $in: categoryIds } } },
-      { new: true },
-    ).populate("categories", "name");
+  const updatedBrand = await Brand.findByIdAndUpdate(
+    brandId,
+    { $pull: { categories: { $in: categoryIds } } },
+    { new: true },
+  ).populate("categories", "name");
 
-    return res
-      .status(200)
-      .json(
-        new ApiResponse(200, updatedBrand, "Categories removed from brand successfully"),
-      );
-
-
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        updatedBrand,
+        "Categories removed from brand successfully",
+      ),
+    );
 });
 
-const deleteBrand = asyncHandler(async (req, res)=>{
-   
-    const user = req.user;
+const deleteBrand = asyncHandler(async (req, res) => {
+  const user = req.user;
 
-    if (!user) {
-      throw new ApiError(401, "Unauthorized");
-    }
+  if (!user) {
+    throw new ApiError(401, "Unauthorized");
+  }
 
-    const { brandId } = req.params;
+  const { brandId } = req.params;
 
-    if (!brandId) {
-      throw new ApiError(400, "Brand ID is required");
-    }
+  if (!brandId) {
+    throw new ApiError(400, "Brand ID is required");
+  }
 
-    const brand = await Brand.findByIdAndDelete(brandId);
+  const brand = await Brand.findByIdAndDelete(brandId);
 
-    if (!brand) {
-      throw new ApiError(404, `Brand with ID ${brandId} not found`);
-    }
+  if (!brand) {
+    throw new ApiError(404, `Brand with ID ${brandId} not found`);
+  }
 
-    return res
-      .status(200)
-      .json(
-        new ApiResponse(200, null, "Brand deleted successfully"),
-      );
+  const products = await Product.deleteMany({
+    brand: brandId,
+  });
 
-
+  return res
+    .status(200)
+    .json(new ApiResponse(200, null, "Brand deleted successfully"));
 });
 
 export {
@@ -308,7 +313,5 @@ export {
   getBrandById,
   addcategoriesToBrand,
   deleteCategoriesFromBrand,
-  deleteBrand
+  deleteBrand,
 };
-
-
