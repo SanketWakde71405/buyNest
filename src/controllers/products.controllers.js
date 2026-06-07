@@ -5,6 +5,7 @@ import { Product } from "../models/products.models.js";
 import { Brand } from "../models/brands.models.js";
 import { Category } from "../models/categories.models.js";
 import { uploadOnCloudinary } from "../utils/cloudinary.js";
+import mongoose from "mongoose";
 
 const createProduct = asyncHandler(async (req, res) => {
   const user = req.user;
@@ -86,6 +87,10 @@ const addImagestoProduct = asyncHandler(async (req, res) => {
 
   const productId = req.body?.productId;
 
+  if (!mongoose.Types.ObjectId.isValid(productId)) {
+    throw new ApiError(400, "Product ID invalid");
+  }
+
   const product = await Product.findById(productId);
 
   if (!product) {
@@ -145,8 +150,8 @@ const getProductById = asyncHandler(async (req, res) => {
 
   const { productID } = req.params;
 
-  if (!productID) {
-    throw new ApiError(404, "Product ID is required");
+  if (!mongoose.Types.ObjectId.isValid(productID)) {
+    throw new ApiError(400, "Product ID invalid");
   }
 
   const product = await Product.findById(productID).select(
@@ -171,15 +176,15 @@ const getProductsByBrand = asyncHandler(async (req, res) => {
 
   const { brandId } = req.body;
 
-  if (!brandId) {
-    return new ApiError(404, "Brand ID required");
+  if (!mongoose.Types.ObjectId.isValid(brandId)) {
+    throw new ApiError(400, "Brand ID invalid");
   }
 
   const products = await Product.find({ brand: brandId }).select(
     "-ratingsAverage -ratingsCount -isActive",
   );
 
-  if (!products) {
+  if (products.length === 0) {
     throw new ApiError(404, "Products not found");
   }
 
@@ -188,55 +193,198 @@ const getProductsByBrand = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, products, "Products fetched successfully"));
 });
 
-const getAllProducts = asyncHandler(async(req,res)=>{
-     const user = req.user;
+const getAllProducts = asyncHandler(async (req, res) => {
+  const user = req.user;
 
-     if(!user){
-       throw new ApiError(401,"Unauthorized");
-     }
+  if (!user) {
+    throw new ApiError(401, "Unauthorized");
+  }
 
-     const products = await Product.find();
+  const products = await Product.find();
 
-     if(!products){
-      throw new ApiError(404,"Products not found");
-     }
+  if (products.length === 0) {
+    throw new ApiError(404, "Products not found");
+  }
 
-     return res.
-     status(200).
-     json(new ApiResponse(200,products,"All Products fetched successfully"));
-
+  return res
+    .status(200)
+    .json(new ApiResponse(200, products, "All Products fetched successfully"));
 });
 
-const deleteProduct= asyncHandler(async(req,res)=>{
-     const user = req.user;
+const deleteProduct = asyncHandler(async (req, res) => {
+  const user = req.user;
 
-     if(!user){
-       throw new ApiError(401,"Unauthorized");
-     }
+  if (!user) {
+    throw new ApiError(401, "Unauthorized");
+  }
 
-     const {productID}= req.params;
+  const { productID } = req.params;
 
-     if(!productID){
-       throw new ApiError(404,"Product ID not found");
-     }
+  if (!mongoose.Types.ObjectId.isValid(productID)) {
+    throw new ApiError(400, "Invalid Product ID");
+  }
 
-     const product = await Product.findByIdAndDelete(productID);
+  const product = await Product.findByIdAndDelete(productID);
 
-     if(!product){
-       throw new ApiError(404,"Product not found");
-     }
+  if (!product) {
+    throw new ApiError(404, "Product not found");
+  }
 
-     return res.
-     status(200).
-     json(new ApiResponse(200,null,"Product deleted successfully"));
-
+  return res
+    .status(200)
+    .json(new ApiResponse(200, null, "Product deleted successfully"));
 });
 
-export { 
-  createProduct, 
-  getProductById, 
+const updateFeatures = asyncHandler(async (req, res) => {
+  const user = req.user;
+
+  if (!user) {
+    throw new ApiError(401, "Unauthorized");
+  }
+
+  const { productId, featuresArray } = req.body;
+
+  if (!mongoose.Types.ObjectId.isValid(productId)) {
+    throw new ApiError(400, "Invalid product ID");
+  }
+
+  const product = await Product.findByIdAndUpdate(
+    productId,
+    {
+      $set: {
+        features: [],
+      },
+    },
+    { new: true },
+  ).select("-ratingsAverage -ratingsCount -isActive");
+
+  if (!featuresArray) {
+    return res
+      .status(200)
+      .json(
+        new ApiResponse(200, product, "Product features deleted successfully"),
+      );
+  }
+
+  const updatedProduct = await Product.findByIdAndUpdate(
+    productId,
+    {
+      $set: {
+        features: featuresArray,
+      },
+    },
+    {
+      new: true,
+    },
+  ).select("-ratingsAverage -ratingsCount -isActive");
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, updatedProduct, "Features added successfully"));
+});
+
+const getProductsByCategory = asyncHandler(async (req, res) => {
+  const user = req.user;
+
+  if (!user) {
+    throw new ApiError(401, "Unauthorized");
+  }
+
+  const { categoryId } = req.body;
+
+  if (!mongoose.Types.ObjectId.isValid(categoryId)) {
+    throw new ApiError(400, "Invalid category ID");
+  }
+
+  // Find category and all descendants
+  const categories = await Category.aggregate([
+    {
+      $match: {
+        _id: new mongoose.Types.ObjectId(categoryId),
+      },
+    },
+    {
+      $graphLookup: {
+        from: "categories",
+        startWith: "$_id",
+        connectFromField: "_id",
+        connectToField: "parentCategory",
+        as: "descendants",
+      },
+    },
+    {
+      $project: {
+        allCategoryIds: {
+          $concatArrays: [["$_id"], "$descendants._id"],
+        },
+      },
+    },
+  ]);
+
+  if (!categories.length) {
+    throw new ApiError(404, "Category not found");
+  }
+
+  const categoryIds = categories[0].allCategoryIds;
+
+  const products = await Product.find({
+    category: {
+      $in: categoryIds,
+    },
+    isActive: true,
+  })
+    .populate("category", "name slug")
+    .populate("brand", "name logo");
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, products, "Products retrieved successfully"));
+});
+
+const addProductstoBrand = asyncHandler(async (req, res) => {
+  const user = req.user;
+
+  if (!user) {
+    throw new ApiError(401, "Unauthorized");
+  }
+
+  const { brandId, products } = req.body;
+
+  if (!mongoose.Types.ObjectId.isValid(brandId)) {
+    throw new ApiError(400, "Invalid Brand ID");
+  }
+
+  if (!products || !Array.isArray(products) || products.length === 0) {
+    throw new ApiError(400, "Products array is required");
+  }
+
+
+  if (products.length > 10) {
+    throw new ApiError(400, "Maximum 10 products can be added at once");
+  }
+
+  const productsToInsert = products.map((product) => ({
+    ...product,
+    brand: brandId,
+  }));
+
+  const createdProducts = await Product.insertMany(productsToInsert);
+
+  return res
+    .status(201)
+    .json(
+      new ApiResponse(201, createdProducts, "Products created successfully"),
+    );
+});
+
+export {
+  createProduct,
+  getProductById,
   addImagestoProduct,
   getProductsByBrand,
   getAllProducts,
-  deleteProduct 
- };
+  deleteProduct,
+  updateFeatures,
+  getProductsByCategory,
+  addProductstoBrand
+};
