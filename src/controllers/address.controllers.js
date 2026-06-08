@@ -28,7 +28,7 @@ const createAddress = asyncHandler(async(req,res)=>{
     }
 
     const address = new Address({
-        user: user._id,
+        user: user?._id,
         type,
         fullName,
         phone,
