@@ -45,6 +45,19 @@ const createProduct = asyncHandler(async (req, res) => {
     );
   }
 
+  // ✅ 1. Move duplicate check BEFORE new Product()
+  // ✅ 2. Compare document fields, not the document itself
+
+  const duplicate = await Product.findOne({ $or: [{ title }, { slug }] });
+
+  if (duplicate) {
+    const conflictField = duplicate.title === title ? "title" : "slug";
+    throw new ApiError(
+      409,
+      `A product with this ${conflictField} already exists`,
+    );
+  }
+
   const product = new Product({
     title,
     description,
@@ -59,17 +72,6 @@ const createProduct = asyncHandler(async (req, res) => {
     ratingsCount,
     isActive,
   });
-
-  const duplicate = await Product.findOne({ $or: [{ title }, { slug }] });
-
-  if (duplicate) {
-    const conflictField = duplicate.name === name ? "name" : "slug";
-    throw new ApiError(
-      409,
-      `A product with this ${conflictField} already exists
-          }`,
-    );
-  }
 
   const newProduct = await Product.create(product);
 

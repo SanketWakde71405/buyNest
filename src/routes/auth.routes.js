@@ -21,7 +21,6 @@ import {
 
 import { validate } from "../middlewares/validator.middleware.js";
 import { verifyJWT } from "../middlewares/auth.middleware.js";
-
 const router = Router();
 
 // unprotected routes no use of JWT token required
