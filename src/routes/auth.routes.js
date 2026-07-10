@@ -8,7 +8,8 @@ import {
     resetPassword,
     refreshTokens,
     logoutUser,
-    changeCurrentPassword
+    changeCurrentPassword,
+    getCurrentUser
 } from "../controllers/auth.controllers.js";
 
 import {
@@ -36,5 +37,6 @@ router.route("/refresh-tokens").post(refreshTokens);
 // protected routes - use of JWT token required
 router.route("/change-password").post(verifyJWT, userChangeCurrentPasswordValidator(), validate, changeCurrentPassword);
 router.route("/logout").post(verifyJWT, logoutUser);
+router.route("/current-user").get(verifyJWT, getCurrentUser);
 
 export default router;
