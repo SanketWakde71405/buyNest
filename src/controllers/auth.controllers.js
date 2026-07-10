@@ -300,7 +300,7 @@ const refreshTokens= asyncHandler(async(req,res)=>{
 
 
   if(!incomingRefreshToken){
-    throw new ApiError(400,"Refresh token is required");
+    throw new ApiError(401,"Refresh token is required");
   }
 
   const decodedToken = jwt.verify(
@@ -381,6 +381,12 @@ const changeCurrentPassword = asyncHandler(async (req, res) => {
     return res.status(200).json(new ApiResponse(200, null, "Password changed successfully"));
 });
 
+const getCurrentUser = asyncHandler(async (req, res) => {
+  return res
+    .status(200)
+    .json(new ApiResponse(200, req.user, "Current user fetched successfully"));
+});
+
 
 export { 
   registerUser, 
@@ -391,5 +397,6 @@ export {
   resetPassword,
   refreshTokens,
   logoutUser,
-  changeCurrentPassword
+  changeCurrentPassword,
+  getCurrentUser
 };

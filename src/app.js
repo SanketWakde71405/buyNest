@@ -1,9 +1,9 @@
 import dotenv from "dotenv";
-dotenv.config({ path: "./.env" });
+dotenv.config({ path: "./src/.env" });
+
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
-
 
 // Routes
 import authRouter from "./routes/auth.routes.js";
@@ -33,7 +33,7 @@ app.use("/api/v1/users/me", userRouter);
 app.use("/api/v1/users/addresses", addressRouter);
 app.use("/api/v1/categories", categoriesRouter);
 app.use("/api/v1/brands", brandsRouter);
-app.use("/api/v1/products",productsRouter);
+app.use("/api/v1/products", productsRouter);
 
 // Error handler
 app.use((err, req, res, next) => {
@@ -45,7 +45,5 @@ app.use((err, req, res, next) => {
     success: false,
   });
 });
-
-
 
 export default app;
