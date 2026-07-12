@@ -53,6 +53,10 @@ const userSchema = new Schema(
     passwordResetExpiry:{
       type: Date,
       default: null,
+    },
+    isFirstLogin:{
+      type:Boolean,
+      default:true,
     }
   },
   {

@@ -9,7 +9,8 @@ import {
     refreshTokens,
     logoutUser,
     changeCurrentPassword,
-    getCurrentUser
+    getCurrentUser,
+    completeOnBoarding
 } from "../controllers/auth.controllers.js";
 
 import {
@@ -38,5 +39,6 @@ router.route("/refresh-tokens").post(refreshTokens);
 router.route("/change-password").post(verifyJWT, userChangeCurrentPasswordValidator(), validate, changeCurrentPassword);
 router.route("/logout").post(verifyJWT, logoutUser);
 router.route("/current-user").get(verifyJWT, getCurrentUser);
+router.route("/complete-onboarding/:userId").patch(verifyJWT,completeOnBoarding);
 
 export default router;
