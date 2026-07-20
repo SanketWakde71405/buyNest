@@ -10,6 +10,8 @@ import {
   passwordResetMailgenContent,
   sendEmail,
 } from "../utils/mail.js";
+import { OAuth2Client } from "google-auth-library";
+
 
 // get user details from frontend
 // validation - not empty
@@ -20,6 +22,9 @@ import {
 // remove password and refresh token field from response
 // check for user creation
 // return res
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
 
 const sendVerificationEmail = async (user, req) => {
   const { unHashedToken, hashedToken, tokenExpiry } =
@@ -227,7 +232,7 @@ const loginUser = asyncHandler(async (req, res) => {
     .json(
       new ApiResponse(
         200,
-        { user: loggedInUser, accessToken, refreshToken },
+        loggedInUser,
         "User logged in successfully",
       ),
     );
@@ -423,6 +428,62 @@ const getCurrentUser = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, req.user, "Current user fetched successfully"));
 });
 
+
+const googleAuth = asyncHandler(async (req, res) => {
+  const { accessToken } = req.body;
+
+  if (!accessToken) {
+    throw new ApiError(400, "Google access token is required");
+  }
+
+  const googleRes = await fetch(
+    `https://www.googleapis.com/oauth2/v3/userinfo?access_token=${accessToken}`,
+  );
+
+  if (!googleRes.ok) {
+    throw new ApiError(401, "Invalid Google access token");
+  }
+
+  const payload = await googleRes.json();
+  const { email, name, picture, sub: googleId, email_verified } = payload;
+
+  if (!email_verified) {
+    throw new ApiError(400, "Google email not verified");
+  }
+
+  // login/link only — do NOT auto-create new Admin accounts here
+  const user = await User.findOne({ $or: [{ googleId }, { email }] });
+
+  if (!user) {
+    throw new ApiError(404, "No account found for this Google email");
+  }
+
+  if (!user.googleId) {
+    user.googleId = googleId;
+    user.authProvider = "google";
+    await user.save({ validateBeforeSave: false });
+  }
+
+  const { accessToken: jwtAccessToken, refreshToken } =
+    await generateAccessandRefreshToken(user._id);
+
+  const loggedInUser = await User.findById(user._id).select(
+    "-password -refreshToken -emailVerificationToken -emailVerificationExpiry",
+  );
+
+  const options = { httpOnly: true, secure: true };
+
+  return res
+    .status(200)
+    .cookie("refreshToken", refreshToken, options)
+    .cookie("accessToken", jwtAccessToken, options)
+    .json(
+      new ApiResponse(200, loggedInUser, "Logged in with Google successfully"),
+    );
+});
+
+
+
 export {
   registerUser,
   verifyEmail,
@@ -434,5 +495,6 @@ export {
   logoutUser,
   changeCurrentPassword,
   getCurrentUser,
-  completeOnBoarding
+  completeOnBoarding,
+  googleAuth,
 };

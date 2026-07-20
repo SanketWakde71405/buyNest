@@ -15,10 +15,13 @@ const userSchema = new Schema(
       required: true,
       unique: true,
       trim: true,
+      lowercase: true,
     },
     password: {
       type: String,
-      required: true,
+      required: function () {
+        return !this.googleId; // not required for Google sign-in users
+      },
       trim: true,
     },
     role: {
@@ -34,6 +37,17 @@ const userSchema = new Schema(
       type: String,
       default: "https://placehold.net/avatar-2.png",
     },
+    googleId: {
+      type: String,
+      default: null,
+      unique: true,
+      sparse: true, // allows many docs with null googleId
+    },
+    authProvider: {
+      type: String,
+      enum: ["local", "google"],
+      default: "local",
+    },
     refreshToken: {
       type: String,
       default: null,
@@ -46,18 +60,18 @@ const userSchema = new Schema(
       type: Date,
       default: null,
     },
-    passwordResetToken:{
+    passwordResetToken: {
       type: String,
       default: null,
     },
-    passwordResetExpiry:{
+    passwordResetExpiry: {
       type: Date,
       default: null,
     },
-    isFirstLogin:{
-      type:Boolean,
-      default:true,
-    }
+    isFirstLogin: {
+      type: Boolean,
+      default: true,
+    },
   },
   {
     timestamps: true,
@@ -65,14 +79,12 @@ const userSchema = new Schema(
 );
 
 userSchema.pre("save", async function () {
-  if (!this.isModified("password")) return;
-
+  if (!this.isModified("password") || !this.password) return;
   this.password = await bcrypt.hash(this.password, 10);
-
-
 });
 
 userSchema.methods.isPasswordCorrect = async function (password) {
+  if (!this.password) return false; // Google-only account, no local password
   return await bcrypt.compare(password, this.password);
 };
 
@@ -112,7 +124,5 @@ userSchema.methods.generateTemporaryToken = function () {
   const tokenExpiry = Date.now() + 20 * 60 * 1000; //20 mins
   return { unHashedToken, hashedToken, tokenExpiry };
 };
-
-
 
 export const User = mongoose.model("User", userSchema);

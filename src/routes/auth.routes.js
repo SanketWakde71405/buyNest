@@ -1,16 +1,17 @@
 import { Router } from "express";
-import { 
-    registerUser, 
-    verifyEmail, 
-    resendVerificationEmail, 
-    loginUser, 
-    forgotPassword, 
-    resetPassword,
-    refreshTokens,
-    logoutUser,
-    changeCurrentPassword,
-    getCurrentUser,
-    completeOnBoarding
+import {
+  registerUser,
+  verifyEmail,
+  resendVerificationEmail,
+  loginUser,
+  forgotPassword,
+  resetPassword,
+  refreshTokens,
+  logoutUser,
+  changeCurrentPassword,
+  getCurrentUser,
+  completeOnBoarding,
+  googleAuth,
 } from "../controllers/auth.controllers.js";
 
 import {
@@ -28,6 +29,7 @@ const router = Router();
 // unprotected routes no use of JWT token required
 router.route("/register").post(registerUserValidator(), validate, registerUser);
 router.route("/login").post(loginUserValidator(), validate, loginUser);
+router.route("/google").post(googleAuth);
 router.route("/verify-email/:verificationToken").get(verifyEmail);
 router.route("/resend-verification-email").post(resendVerificationEmail);
 router.route("/forgot-password").post(userForgotPasswordValidator(), validate, forgotPassword);
