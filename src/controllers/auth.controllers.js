@@ -69,9 +69,7 @@ const sendPasswordResetEmail = async (user, req) => {
     subject: "Reset your password",
     mailgenContent: passwordResetMailgenContent(
       user.name,
-      `${req.protocol}://${req.get(
-        "host",
-      )}/api/v1/auth/reset-password/${unHashedToken}`,
+      `${process.env.FRONTEND_URL}/auth/reset-password/${unHashedToken}`,
     ),
   });
 };
