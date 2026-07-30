@@ -3,6 +3,7 @@ export const DB_NAME = "buynest_db";
 export const ROLES = {
   USER: "User",
   ADMIN: "Admin",
+  EMPLOYEE:"Employee"
 };
 
 export const ADDRESS_TYPES = {
@@ -17,17 +18,38 @@ export const PAYMENT_METHODS = {
   CASH_ON_DELIVERY: "Cash on Delivery",
 };
 
-export const PAYMENT_STATUS={
+export const PAYMENT_STATUS = {
   PENDING: "Pending",
   COMPLETED: "Completed",
   FAILED: "Failed",
-  REFUNDED: "Refunded"
-}
+  REFUNDED: "Refunded",
+};
 
-export const ORDER_STATUS={
+export const ORDER_STATUS = {
   PENDING: "Pending",
   CONFIRMED: "Confirmed",
   SHIPPED: "Shipped",
   DELIVERED: "Delivered",
-  CANCELLED: "Cancelled"
-}
+  CANCELLED: "Cancelled",
+};
+
+export const BUSINESS_TYPES = {
+  INDIVIDUAL: "individual",
+  PROPRIETORSHIP: "proprietorship",
+  PARTNERSHIP: "partnership",
+  LLP: "llp",
+  PRIVATE_LIMITED: "private_limited",
+};
+
+// Only for product controllers
+export const UPDATABLE_FIELDS = [
+  "title",
+  "description",
+  "slug",
+  "price",
+  "discountPrice",
+  "category",
+  "stock",
+  "brand",
+  "isActive",
+];

@@ -11,17 +11,8 @@ import {
   sendEmail,
 } from "../utils/mail.js";
 import { OAuth2Client } from "google-auth-library";
+import { ROLES } from "../constants.js";
 
-
-// get user details from frontend
-// validation - not empty
-// check if user already exists: username, email
-// check for images, check for avatar
-// upload them to cloudinary, avatar
-// create user object - create entry in db
-// remove password and refresh token field from response
-// check for user creation
-// return res
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -94,7 +85,7 @@ const generateAccessandRefreshToken = async (userId) => {
 };
 
 const registerUser = asyncHandler(async (req, res) => {
-  const { name, email, password, role } = req.body;
+  const { name, email, password } = req.body;
 
   if (!name || !email || !password) {
     throw new ApiError(400, "Name, email and password are required");
@@ -105,7 +96,12 @@ const registerUser = asyncHandler(async (req, res) => {
     throw new ApiError(400, "User with this email already exists");
   }
 
-  const user = await User.create({ name, email, password, role });
+  // Single-seller app: `role` is never accepted from the request body.
+  // Public registration always creates a regular buyer (schema default);
+  // the one admin account is provisioned out-of-band (seed script / direct
+  // DB write) — never through this endpoint. Previously `role` was pulled
+  // straight from req.body, which meant anyone could sign up as an admin.
+  const user = await User.create({ name, email, password });
 
   if (!user) {
     throw new ApiError(500, "Failed to create user");
@@ -128,6 +124,94 @@ const registerUser = asyncHandler(async (req, res) => {
         200,
         createdUser,
         "User registered Successfully. Please verify your email to activate your account.",
+      ),
+    );
+});
+
+const registerAdmin = asyncHandler(async (req, res) => {
+  const { name, email, password, setupKey } = req.body;
+
+  if (!name || !email || !password) {
+    throw new ApiError(400, "Name, email and password are required");
+  }
+
+  if (!process.env.ADMIN_SETUP_KEY || setupKey !== process.env.ADMIN_SETUP_KEY) {
+    throw new ApiError(403, "Invalid or missing setup key");
+  }
+
+  const existingAdmin = await User.findOne({ role: ROLES.ADMIN });
+  if (existingAdmin) {
+    throw new ApiError(400, "An admin account already exists");
+  }
+
+  const existingUser = await User.findOne({ email });
+  if (existingUser) {
+    throw new ApiError(400, "User with this email already exists");
+  }
+
+  const admin = await User.create({
+    name,
+    email,
+    password,
+    role: ROLES.ADMIN,
+  });
+
+  const createdAdmin = await User.findById(admin._id).select(
+    "-password -refreshToken -emailVerificationToken -emailVerificationExpiry",
+  );
+
+  await sendVerificationEmail(admin, req);
+
+  return res
+    .status(201)
+    .json(
+      new ApiResponse(
+        201,
+        createdAdmin,
+        "Admin account created successfully. Please verify your email.",
+      ),
+    );
+});
+
+// Ongoing employee creation: unlike the admin bootstrap above, this is
+// meant to be used repeatedly, so it's gated behind an existing admin's
+// session instead of a shared secret. The route applies
+// verifyJWT + authorizeRoles(ROLES.ADMIN), so by the time this function
+// runs, req.user.role has already been verified server-side from the
+// JWT — that's what's trustworthy here, not anything in req.body.
+// `role` is hardcoded to EMPLOYEE; this endpoint has exactly one purpose.
+const createEmployee = asyncHandler(async (req, res) => {
+  const { name, email, password } = req.body;
+
+  if (!name || !email || !password) {
+    throw new ApiError(400, "Name, email and password are required");
+  }
+
+  const existingUser = await User.findOne({ email });
+  if (existingUser) {
+    throw new ApiError(400, "User with this email already exists");
+  }
+
+  const employee = await User.create({
+    name,
+    email,
+    password,
+    role: ROLES.EMPLOYEE,
+  });
+
+  const createdEmployee = await User.findById(employee._id).select(
+    "-password -refreshToken -emailVerificationToken -emailVerificationExpiry",
+  );
+
+  await sendVerificationEmail(employee, req);
+
+  return res
+    .status(201)
+    .json(
+      new ApiResponse(
+        201,
+        createdEmployee,
+        "Employee account created successfully. They'll need to verify their email before logging in.",
       ),
     );
 });
@@ -484,6 +568,8 @@ const googleAuth = asyncHandler(async (req, res) => {
 
 export {
   registerUser,
+  registerAdmin,
+  createEmployee,
   verifyEmail,
   resendVerificationEmail,
   loginUser,

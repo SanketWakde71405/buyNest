@@ -1,9 +1,10 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
-import {Product} from "../models/products.models.js";
-import {Category} from "../models/categories.models.js";
-
+import { Product } from "../models/products.models.js";
+import { Category } from "../models/categories.models.js";
+import { Store } from "../models/store.models.js";
+import mongoose from "mongoose";
 
 const createCategory = asyncHandler(async (req, res) => {
   const user = req.user;
@@ -58,10 +59,10 @@ const createCategory = asyncHandler(async (req, res) => {
     .json(new ApiResponse(201, category, "Category created successfully"));
 });
 
-const getCategories = asyncHandler(async (req,res) =>{
+const getCategories = asyncHandler(async (req, res) => {
   const user = req.user;
 
-  if(!user){
+  if (!user) {
     throw new ApiError(401, "Unauthorized");
   }
 
@@ -69,81 +70,119 @@ const getCategories = asyncHandler(async (req,res) =>{
     "-slug -description -parentCategory -createdAt -updatedAt",
   );
 
-  if(!categories){
+  if (!categories) {
     throw new ApiError(404, "No categories found");
   }
 
-  return res.
-  status(200).
-  json(new ApiResponse(200, categories, "Categories retrieved successfully"));
-
-
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(200, categories, "Categories retrieved successfully"),
+    );
 });
 
-const getCategoryById = asyncHandler(async(req,res)=>{
-     const user = req.user;
-     const {categoryId} = req.params;
+const getCategoryById = asyncHandler(async (req, res) => {
+  const user = req.user;
+  const { categoryId } = req.params;
 
-     if(!user){
-        throw new ApiError(401, "Unauthorized");
-     }
+  if (!user) {
+    throw new ApiError(401, "Unauthorized");
+  }
 
-     if(!categoryId){
-        throw new ApiError(400, "Category ID is required");
-     }
+  if (!categoryId) {
+    throw new ApiError(400, "Category ID is required");
+  }
 
-     const category = await Category.findById(categoryId);
+  const category = await Category.findById(categoryId);
 
-     if(!category){
-        throw new ApiError(404, "Category not found");
-     }
+  if (!category) {
+    throw new ApiError(404, "Category not found");
+  }
 
-     return res.
-     status(200).
-      json(new ApiResponse(200, category, "Category retrieved successfully"));
-
+  return res
+    .status(200)
+    .json(new ApiResponse(200, category, "Category retrieved successfully"));
 });
 
-const getParentCategories = asyncHandler(async(req,res)=>{
-      const user = req.user;
-      if(!user){
-        throw new ApiError(401, "Unauthorized");
-      }
+const getParentCategories = asyncHandler(async (req, res) => {
+  const user = req.user;
+  if (!user) {
+    throw new ApiError(401, "Unauthorized");
+  }
 
-      const parentCategories = await Category.find({ parentCategory: null });
+  const parentCategories = await Category.find({ parentCategory: null });
 
-      if(!parentCategories){
-        throw new ApiError(404, "No parent categories found");
-      }
+  if (!parentCategories) {
+    throw new ApiError(404, "No parent categories found");
+  }
 
-      return res.
-      status(200).
-      json(new ApiResponse(200, parentCategories, "Parent categories retrieved successfully"));
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        parentCategories,
+        "Parent categories retrieved successfully",
+      ),
+    );
 });
 
+const getParentCategoriesForStore = asyncHandler(async (req, res) => {
+  const user = req.user;
 
-const getSubCategories = asyncHandler(async(req,res)=>{
-    const user = req.user;
-    const {parentCategoryName} = req.body;
+  if (!user) {
+    throw new ApiError(401, "Unauthorized access");
+  }
 
-    if(!user){
-      throw new ApiError(401, "Unauthorized");
-    }
+  const store = await Store.findOne({ owner: user._id });
 
-    if(!parentCategoryName){
-      throw new ApiError(400, "Parent category name is required");
-    }
+  if (!store) {
+    throw new ApiError(404, "Store not found");
+  }
 
-    const subCategories = await Category.find({ parentCategoryName });
+  const categoryIds = store.categories;
 
-    if(!subCategories){
-      throw new ApiError(404, "No subcategories found for the given parent category name");
-    }
+  if (!categoryIds) {
+    throw new ApiError(404, "No categories for this store");
+  }
 
-    return res.
-    status(200).
-    json(new ApiResponse(200, subCategories, "Subcategories retrieved successfully"));
+  const categories = await Category.find(
+    { _id: { $in: categoryIds } },
+    "name slug", // only pull back what you need
+  );
 
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(200, categories, "Categories retrieved successfully"),
+    );
+});
+
+const getSubCategories = asyncHandler(async (req, res) => {
+  const user = req.user;
+  const { parentCategoryId } = req.params;
+
+  if (!user) {
+    throw new ApiError(401, "Unauthorized");
+  }
+
+  if (!parentCategoryId || !mongoose.Types.ObjectId.isValid(parentCategoryId)) {
+    throw new ApiError(400, "A valid parent category ID is required");
+  }
+
+  const subCategories = await Category.find({
+    parentCategory: parentCategoryId,
+  });
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        subCategories,
+        "Subcategories retrieved successfully",
+      ),
+    );
 });
 
 const updateCategory = asyncHandler(async (req, res) => {
@@ -258,12 +297,13 @@ const deleteCategory = asyncHandler(async (req, res) => {
     );
 });
 
-export { 
+export {
   createCategory,
   getCategories,
   getParentCategories,
+  getParentCategoriesForStore,
   getSubCategories,
   getCategoryById,
   updateCategory,
-  deleteCategory 
+  deleteCategory,
 };

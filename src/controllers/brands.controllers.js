@@ -5,6 +5,7 @@ import { Brand } from "../models/brands.models.js";
 import { Category } from "../models/categories.models.js";
 import { Product } from "../models/products.models.js";
 import { uploadOnCloudinary } from "../utils/cloudinary.js";
+import mongoose from "mongoose";
 
 const createBrand = asyncHandler(async (req, res) => {
   const user = req.user;
@@ -197,6 +198,33 @@ const getBrandById = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, brand, "Brand retrieved successfully"));
 });
 
+// New: brands already registered under a given category — this is what
+// lets the "pick an existing brand, or create one" UI work. A brand
+// counts as "under" a category if that category id is directly in its
+// `categories` array (matches how createBrand/addcategoriesToBrand save
+// it — no ancestor walk needed here, unlike the product/store check).
+const getBrandsByCategory = asyncHandler(async (req, res) => {
+  const user = req.user;
+
+  if (!user) {
+    throw new ApiError(401, "Unauthorized");
+  }
+
+  const { categoryId } = req.params;
+
+  if (!categoryId || !mongoose.Types.ObjectId.isValid(categoryId)) {
+    throw new ApiError(400, "A valid category ID is required");
+  }
+
+  const brands = await Brand.find({ categories: categoryId }).select(
+    "name slug logo",
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, brands, "Brands retrieved successfully"));
+});
+
 const addcategoriesToBrand = asyncHandler(async (req, res) => {
   const user = req.user;
 
@@ -311,6 +339,7 @@ export {
   updateBrandDetails,
   getAllBrands,
   getBrandById,
+  getBrandsByCategory,
   addcategoriesToBrand,
   deleteCategoriesFromBrand,
   deleteBrand,
