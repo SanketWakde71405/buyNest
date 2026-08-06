@@ -31,7 +31,7 @@ router
   .post(verifyJWT, authorizeRoles(ROLES.ADMIN),addBulkProducts(),validate, addProductstoBrand);
 router
   .route("/add-images")
-  .put(
+  .patch(
     verifyJWT,
     authorizeRoles(ROLES.ADMIN),
     upload.array("images", 5),

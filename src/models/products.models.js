@@ -23,12 +23,15 @@ const productSchema = new Schema(
     },
     discountPrice: {
       type: Number,
-      required:true,
+      required: true,
     },
     category: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Category",
+      type: [{ type: mongoose.Schema.Types.ObjectId, ref: "Category" }],
       required: true,
+      validate: {
+        validator: (arr) => Array.isArray(arr) && arr.length > 0,
+        message: "At least one category is required",
+      },
     },
     stock: {
       type: Number,
@@ -37,7 +40,7 @@ const productSchema = new Schema(
     brand: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Brand",
-      required:true,
+      required: true,
     },
     images: [
       {

@@ -4,7 +4,10 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { Brand } from "../models/brands.models.js";
 import { Category } from "../models/categories.models.js";
 import { Product } from "../models/products.models.js";
+import { Store } from "../models/store.models.js";
+import { slugifyForFolder } from "../utils/slugify.js";
 import { uploadOnCloudinary } from "../utils/cloudinary.js";
+import mongoose from "mongoose";
 
 const createBrand = asyncHandler(async (req, res) => {
   const user = req.user;
@@ -13,7 +16,7 @@ const createBrand = asyncHandler(async (req, res) => {
     throw new ApiError(401, "Unauthorized");
   }
 
-  const { name, slug, description, logo, categories } = req.body;
+  const { name, slug, description, categories } = req.body;
   if (!name || !slug) {
     throw new ApiError(400, "Name and slug are required");
   }
@@ -45,7 +48,6 @@ const createBrand = asyncHandler(async (req, res) => {
     name,
     slug,
     description,
-    logo,
     categories,
   });
 
@@ -62,32 +64,51 @@ const updateBrandLogo = asyncHandler(async (req, res) => {
   }
 
   const brandId = req.body?.brandId;
-
   const brandLogo = req.file?.path;
+
+  if (!mongoose.Types.ObjectId.isValid(brandId)) {
+    throw new ApiError(400, "Brand ID invalid");
+  }
 
   if (!brandLogo) {
     throw new ApiError(400, "Brand logo file is missing");
   }
 
-  const logo = await uploadOnCloudinary(brandLogo);
+  const [brand, store] = await Promise.all([
+    Brand.findById(brandId).populate("categories", "name"),
+    Store.findOne({ owner: user?._id }),
+  ]);
+
+  if (!brand) {
+    throw new ApiError(404, `Brand with ID ${brandId} not found`);
+  }
+
+  if (!store) {
+    throw new ApiError(404, "Store not found for this user");
+  }
+
+  const categoryName = brand.categories?.[0]?.name || "uncategorized";
+
+  const folder = [store.storeName, categoryName, brand.name, "logo"]
+    .map(slugifyForFolder)
+    .join("/");
+
+  const logo = await uploadOnCloudinary(brandLogo, { folder });
 
   if (!logo || !logo.url) {
     throw new ApiError(400, "Error while uploading brand logo");
   }
 
-  const brand = await Brand.findByIdAndUpdate(
-    brandId,
-    { $set: { logo: logo.url } },
-    { new: true },
-  ).select("-categories");
+  brand.logo = logo.url;
+  await brand.save();
 
-  if (!brand) {
-    throw new ApiError(404, "Brand with ID ${brandId} not found");
-  }
+  const updatedBrand = await Brand.findById(brandId).select("-categories");
 
   return res
     .status(200)
-    .json(new ApiResponse(200, brand, "Brand logo updated successfully"));
+    .json(
+      new ApiResponse(200, updatedBrand, "Brand logo updated successfully"),
+    );
 });
 
 const updateBrandDetails = asyncHandler(async (req, res) => {
@@ -195,6 +216,32 @@ const getBrandById = asyncHandler(async (req, res) => {
   return res
     .status(200)
     .json(new ApiResponse(200, brand, "Brand retrieved successfully"));
+});
+
+const getBrandFromCategories = asyncHandler(async (req, res) => {
+  const user = req.user;
+
+  if (!user) {
+    throw new ApiError(401, "Unauthorized access!");
+  }
+
+  const { categoryId } = req.params;
+
+  if (!categoryId) {
+    throw new ApiError(400, "Category ID is required");
+  }
+
+  const brands = await Brand.find({ categories: categoryId }).select(
+    "name slug logo categories",
+  );
+
+  if (!brands || brands.length === 0) {
+    throw new ApiError(404, "No brands found for this category");
+  }
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, brands, "Brands retrieved successfully"));
 });
 
 const addcategoriesToBrand = asyncHandler(async (req, res) => {
@@ -314,4 +361,5 @@ export {
   addcategoriesToBrand,
   deleteCategoriesFromBrand,
   deleteBrand,
+  getBrandFromCategories,
 };

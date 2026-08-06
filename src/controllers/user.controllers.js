@@ -43,23 +43,37 @@ const updateUserAvatar = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Avatar file is missing");
   }
 
-  const avatar = await uploadOnCloudinary(avatarLocalPath);
+  const avatar = await uploadOnCloudinary(avatarLocalPath, {
+    folder: `users/${req.user._id}`,
+    publicId: "avatar",
+    overwrite: true,
+  });
 
-  if (!avatar || !avatar.url) {
-    // ✅ null-safe check
+  if (!avatar?.secure_url) {
     throw new ApiError(400, "Error while uploading avatar");
   }
 
   const user = await User.findByIdAndUpdate(
-    req.user?._id,
-    { $set: { avatar: avatar.url } },
-    { new: true },
+    req.user._id,
+    {
+      $set: {
+        avatar: {
+          url: avatar.secure_url,
+          public_id: avatar.public_id,
+        },
+      },
+    },
+    {
+      new: true,
+      runValidators: true,
+    },
   ).select("-password");
 
   return res
     .status(200)
-    .json(new ApiResponse(200, user, "Avatar image updated successfully"));
+    .json(new ApiResponse(200, user, "Avatar updated successfully."));
 });
+
 
 
 

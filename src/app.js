@@ -13,6 +13,7 @@ import addressRouter from "./routes/address.routes.js";
 import categoriesRouter from "./routes/categories.routes.js";
 import brandsRouter from "./routes/brands.routes.js";
 import productsRouter from "./routes/products.routes.js";
+import storeRouter from "./routes/store.routes.js";
 
 const app = express();
 
@@ -34,6 +35,8 @@ app.use("/api/v1/users/addresses", addressRouter);
 app.use("/api/v1/categories", categoriesRouter);
 app.use("/api/v1/brands", brandsRouter);
 app.use("/api/v1/products", productsRouter);
+app.use("/api/v1/store",storeRouter);
+
 
 // Error handler
 app.use((err, req, res, next) => {
