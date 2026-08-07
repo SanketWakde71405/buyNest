@@ -4,6 +4,8 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { Product } from "../models/products.models.js";
 import { Brand } from "../models/brands.models.js";
 import { Category } from "../models/categories.models.js";
+import { Store } from "../models/store.models.js";
+import { slugifyForFolder } from "../utils/slugify.js";
 import { uploadOnCloudinary } from "../utils/cloudinary.js";
 import mongoose from "mongoose";
 
@@ -36,13 +38,22 @@ const createProduct = asyncHandler(async (req, res) => {
     !price ||
     !discountPrice ||
     !brand ||
-    !category ||
-    !stock
+    !stock ||
+    !Array.isArray(category) ||
+    category.length === 0
   ) {
     throw new ApiError(
       400,
-      "Title,slug,description,Price, discount price,brand, category and stock are required fields",
+      "Title, slug, description, price, discount price, brand, stock and at least one category are required fields",
     );
+  }
+
+  const invalidCategoryId = category.some(
+    (id) => !mongoose.Types.ObjectId.isValid(id),
+  );
+
+  if (invalidCategoryId) {
+    throw new ApiError(400, "One or more category IDs are invalid");
   }
 
   // ✅ 1. Move duplicate check BEFORE new Product()
@@ -93,49 +104,63 @@ const addImagestoProduct = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Product ID invalid");
   }
 
-  const product = await Product.findById(productId);
+  const [product, store] = await Promise.all([
+    Product.findById(productId)
+      .populate("brand", "name")
+      .populate("category", "name"),
+    Store.findOne({ owner: user?._id }),
+  ]);
 
   if (!product) {
     throw new ApiError(404, "Product not found");
   }
 
-  let existingImages = req.body.existingImages || [];
+  if (!store) {
+    throw new ApiError(404, "Store not found for this user");
+  }
 
-  // Handle case when only one image is sent
+  let existingImages = req.body.existingImages || [];
   if (!Array.isArray(existingImages)) {
     existingImages = [existingImages];
   }
 
-  // Upload new images
   let uploadedImageUrls = [];
 
   if (req.files?.length > 0) {
+    const categoryName = product.category?.[0]?.name || "uncategorized";
+    const brandName = product.brand?.name || "unbranded";
+
+    const folder = [
+      store.storeName,
+      categoryName,
+      brandName,
+      product._id.toString(),
+    ]
+      .map(slugifyForFolder)
+      .join("/");
+
     const uploadedImages = await Promise.all(
-      req.files.map((file) => uploadOnCloudinary(file.path)),
+      req.files.map((file) => uploadOnCloudinary(file.path, { folder })),
     );
 
     uploadedImageUrls = uploadedImages.map((image) => {
       if (!image?.url) {
         throw new ApiError(400, "Error uploading image");
       }
-
       return image.url;
     });
   }
 
   const finalImages = [...existingImages, ...uploadedImageUrls];
 
-  // Validation
   if (finalImages.length < 3) {
     throw new ApiError(400, "A product must contain at least 3 images");
   }
-
   if (finalImages.length > 5) {
     throw new ApiError(400, "A product can contain at most 5 images");
   }
 
   product.images = finalImages;
-
   await product.save();
 
   return res
@@ -285,6 +310,7 @@ const updateFeatures = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, updatedProduct, "Features added successfully"));
 });
 
+
 const getProductsByCategory = asyncHandler(async (req, res) => {
   const user = req.user;
 
@@ -360,7 +386,6 @@ const addProductstoBrand = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Products array is required");
   }
 
-
   if (products.length > 10) {
     throw new ApiError(400, "Maximum 10 products can be added at once");
   }
@@ -388,5 +413,5 @@ export {
   deleteProduct,
   updateFeatures,
   getProductsByCategory,
-  addProductstoBrand
+  addProductstoBrand,
 };

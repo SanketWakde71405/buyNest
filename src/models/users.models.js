@@ -34,8 +34,14 @@ const userSchema = new Schema(
       default: false,
     },
     avatar: {
-      type: String,
-      default: "https://placehold.net/avatar-2.png",
+      url: {
+        type: String,
+        default: "https://placehold.net/avatar-2.png",
+      },
+      public_id: {
+        type: String,
+        default: "",
+      },
     },
     googleId: {
       type: String,
