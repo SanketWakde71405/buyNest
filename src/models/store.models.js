@@ -36,6 +36,120 @@ const addressSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const paymentMethodsSchema = new mongoose.Schema(
+  {
+    upi: { type: Boolean, default: false },
+    cards: { type: Boolean, default: false },
+    netBanking: { type: Boolean, default: false },
+    cod: { type: Boolean, default: false },
+    wallets: { type: Boolean, default: false },
+  },
+  { _id: false },
+);
+
+const payoutDetailsSchema = new mongoose.Schema(
+  {
+    accountHolderName: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    // Only the last 4 digits are kept in plaintext for display purposes.
+    // The full account number is stored encrypted below and must never
+    // be returned in an API response.
+    accountNumberLast4: {
+      type: String,
+      default: "",
+    },
+    accountNumberEncrypted: {
+      type: String,
+      default: "",
+      select: false,
+    },
+    ifscCode: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: "",
+      match: [/^[A-Z]{4}0[A-Z0-9]{6}$/, "Invalid IFSC code"],
+    },
+  },
+  { _id: false },
+);
+
+const paymentSettingsSchema = new mongoose.Schema(
+  {
+    methods: {
+      type: paymentMethodsSchema,
+      default: () => ({}),
+    },
+    codOrderLimit: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
+    payout: {
+      type: payoutDetailsSchema,
+      default: () => ({}),
+    },
+  },
+  { _id: false },
+);
+
+const shippingSettingsSchema = new mongoose.Schema(
+  {
+    domesticOnly: {
+      type: Boolean,
+      default: true,
+    },
+    freeShippingThreshold: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
+    estimatedDeliveryDays: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+  },
+  { _id: false },
+);
+
+const taxSettingsSchema = new mongoose.Schema(
+  {
+    gstRegistered: {
+      type: Boolean,
+      default: false,
+    },
+    gstin: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: "",
+      match: [
+        /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/,
+        "Invalid GSTIN",
+      ],
+    },
+    pricingType: {
+      type: String,
+      enum: ["inclusive", "exclusive"],
+      default: "exclusive",
+    },
+    // Back the "Additional Tax Options" toggles in TaxTab.jsx.
+    displayTaxSeparately: {
+      type: Boolean,
+      default: false,
+    },
+    roundOffTax: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  { _id: false },
+);
+
 const storeSchema = new mongoose.Schema(
   {
     // Owner of the store
@@ -113,6 +227,22 @@ const storeSchema = new mongoose.Schema(
       },
     },
 
+    // Payment, Shipping & Tax Settings (Onboarding Step 3)
+    settings: {
+      payment: {
+        type: paymentSettingsSchema,
+        default: () => ({}),
+      },
+      shipping: {
+        type: shippingSettingsSchema,
+        default: () => ({}),
+      },
+      tax: {
+        type: taxSettingsSchema,
+        default: () => ({}),
+      },
+    },
+
     // Store Status
     status: {
       type: String,
@@ -167,5 +297,4 @@ storeSchema.index({ storeName: 1 }, { unique: true });
 // One user can own only one store
 storeSchema.index({ owner: 1 }, { unique: true });
 
-
-export const Store =mongoose.model("Store", storeSchema);
+export const Store = mongoose.model("Store", storeSchema);
