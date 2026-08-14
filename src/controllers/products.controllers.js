@@ -48,12 +48,13 @@ const createProduct = asyncHandler(async (req, res) => {
     );
   }
 
-  const invalidCategoryId = category.some(
-    (id) => !mongoose.Types.ObjectId.isValid(id),
-  );
+  if (!mongoose.Types.ObjectId.isValid(brand)) {
+    throw new ApiError(400, "Brand ID invalid");
+  }
 
-  if (invalidCategoryId) {
-    throw new ApiError(400, "One or more category IDs are invalid");
+  const brandExists = await Brand.findById(brand);
+  if (!brandExists) {
+    throw new ApiError(404, `Brand with ID ${brand} not found`);
   }
 
   // ✅ 1. Move duplicate check BEFORE new Product()
@@ -67,6 +68,12 @@ const createProduct = asyncHandler(async (req, res) => {
       409,
       `A product with this ${conflictField} already exists`,
     );
+  }
+
+  const invalidBrandId= !mongoose.Types.ObjectId.isValid(brand);
+
+  if(invalidBrandId){
+     throw new ApiError(500, "Invalid brand ID. Check whether the brand exists or try contacting developer.");
   }
 
   const product = new Product({
@@ -310,7 +317,6 @@ const updateFeatures = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, updatedProduct, "Features added successfully"));
 });
 
-
 const getProductsByCategory = asyncHandler(async (req, res) => {
   const user = req.user;
 
@@ -404,6 +410,56 @@ const addProductstoBrand = asyncHandler(async (req, res) => {
     );
 });
 
+const updateProduct = asyncHandler(async (req, res) => {
+  const user = req.user;
+  if (!user) {
+    throw new ApiError(401, "Unauthorized access");
+  }
+
+  const { productId, title, description, slug, price, discountPrice, stock } =
+    req.body;
+
+  if (!productId) {
+    throw new ApiError(400, "Product ID is required");
+  }
+  if (!title) {
+    throw new ApiError(400, "Product title is required");
+  }
+  if (!slug) {
+    throw new ApiError(400, "Product slug is required");
+  }
+
+  const duplicate = await Product.findOne({ $or: [{ title }, { slug }] });
+
+  if (duplicate?._id.toString() !== productId) {
+    throw new ApiError(
+      500,
+      "Another product with this title or slug already exists.",
+    );
+  }
+
+  const updatedProduct = await Product.findByIdAndUpdate(
+    productId,
+    {
+      title,
+      description,
+      slug,
+      price,
+      discountPrice,
+      stock,
+    },
+    { new: true },
+  );
+
+  if (!updatedProduct) {
+    throw new ApiError(404, "Updating product failed");
+  }
+
+  return res
+    .status(201)
+    .json(new ApiResponse(200, updatedProduct, "Product updated successfully"));
+});
+
 export {
   createProduct,
   getProductById,
@@ -414,4 +470,5 @@ export {
   updateFeatures,
   getProductsByCategory,
   addProductstoBrand,
+  updateProduct
 };

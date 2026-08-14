@@ -83,7 +83,7 @@ const updateFeaturesValidator= ()=>{
        .withMessage("Product ID is required")
        .isMongoId()
        .withMessage("Product ID is invalid"),
-     body("features")
+     body("featuresArray")
      .notEmpty()
      .isArray({ min: 1, max: 10 })
      .withMessage("Feature array cannot be more than 10 elements"),
