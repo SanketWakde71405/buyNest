@@ -6,7 +6,10 @@ import { Category } from "../models/categories.models.js";
 import { Product } from "../models/products.models.js";
 import { Store } from "../models/store.models.js";
 import { slugifyForFolder } from "../utils/slugify.js";
-import { uploadOnCloudinary } from "../utils/cloudinary.js";
+import {
+  uploadOnCloudinary,
+  deleteFromCloudinary,
+} from "../utils/cloudinary.js";
 import mongoose from "mongoose";
 
 const createBrand = asyncHandler(async (req, res) => {
@@ -99,7 +102,16 @@ const updateBrandLogo = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Error while uploading brand logo");
   }
 
+  // Delete the previous logo from Cloudinary only after the new one
+  // has uploaded successfully, so a failed upload never leaves the
+  // brand without any logo asset.
+  const previousLogoPublicId = brand.logoPublicId;
+  if (previousLogoPublicId) {
+    await deleteFromCloudinary(previousLogoPublicId);
+  }
+
   brand.logo = logo.url;
+  brand.logoPublicId = logo.public_id;
   await brand.save();
 
   const updatedBrand = await Brand.findById(brandId).select("-categories");
@@ -341,6 +353,11 @@ const deleteBrand = asyncHandler(async (req, res) => {
 
   if (!brand) {
     throw new ApiError(404, `Brand with ID ${brandId} not found`);
+  }
+
+  // Clean up the brand's logo asset from Cloudinary, if one was uploaded
+  if (brand.logoPublicId) {
+    await deleteFromCloudinary(brand.logoPublicId);
   }
 
   const products = await Product.deleteMany({

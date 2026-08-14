@@ -8,6 +8,7 @@ import {
   updateFeatures,
   getProductsByCategory,
   addProductstoBrand,
+  updateProduct
 } from "../controllers/products.controllers.js";
 import {
   createProductValidator,
@@ -41,9 +42,10 @@ router
   );
 router
   .route("/features")
-  .put(verifyJWT, authorizeRoles(ROLES.ADMIN),updateFeaturesValidator(),validate, updateFeatures);
+  .patch(verifyJWT, authorizeRoles(ROLES.ADMIN),updateFeaturesValidator(),validate, updateFeatures);
 router.route("/brand").get(verifyJWT, getProductsByBrand);
 router.route("/category").get(verifyJWT, getProductsByCategory);
+router.route("/update").put(verifyJWT,authorizeRoles(ROLES.ADMIN),updateProduct);
 router.route("/").get(verifyJWT, getAllProducts);
 router.route("/:productID").get(verifyJWT, getProductById);
 router

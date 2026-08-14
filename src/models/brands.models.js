@@ -20,10 +20,16 @@ const brandSchema = new Schema(
       type: String,
       default: "https://placehold.net/logo-2.png",
     },
-    categories: [{
-      type: Schema.Types.ObjectId,
-      ref: "Category",
-    }],
+    logoPublicId: {
+      type: String,
+      default: null,
+    },
+    categories: [
+      {
+        type: Schema.Types.ObjectId,
+        ref: "Category",
+      },
+    ],
   },
   {
     timestamps: true,
