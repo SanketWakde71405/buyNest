@@ -75,6 +75,29 @@ const addImagesToProductValidator = () => {
       }),
   ];
 };
+const deleteAllProductImagesValidator = () => {
+  return [
+    body("productId")
+      .trim()
+      .notEmpty()
+      .withMessage("Product ID is required")
+      .isMongoId()
+      .withMessage("Invalid Product ID"),
+  ];
+};
+
+const deleteProductImageValidator = () => {
+  return [
+    body("productId")
+      .trim()
+      .notEmpty()
+      .withMessage("Product ID is required")
+      .isMongoId()
+      .withMessage("Invalid Product ID"),
+    body("imageUrl").trim().notEmpty().withMessage("Image URL is required"),
+  ];
+};
+
 
 const updateFeaturesValidator= ()=>{
    return [
@@ -91,9 +114,40 @@ const updateFeaturesValidator= ()=>{
    ];
 }
 
-export { 
+const updateProductValidator = () => {
+  return [
+    body("productId")
+      .trim()
+      .notEmpty()
+      .withMessage("Product ID is required")
+      .isMongoId()
+      .withMessage("Invalid Product ID"),
+    body("title").notEmpty().trim().withMessage("Product title is required"),
+    body("slug").notEmpty().trim().withMessage("Product Slug is required"),
+    body("description").optional().trim(),
+    body("price").optional().isNumeric().withMessage("Price must be a number"),
+    body("discountPrice")
+      .optional()
+      .isNumeric()
+      .withMessage("Discount must be a number"),
+    body("costPrice")
+      .optional()
+      .isNumeric()
+      .withMessage("Cost price must be a number"),
+    body("stock")
+      .optional()
+      .isInt()
+      .withMessage("Stock must be a whole number"),
+    body("isActive").optional().isBoolean(),
+  ];
+};
+
+export {
   createProductValidator,
   addBulkProducts,
   addImagesToProductValidator,
-  updateFeaturesValidator 
+  updateFeaturesValidator,
+  deleteAllProductImagesValidator,
+  deleteProductImageValidator,
+  updateProductValidator,
 };

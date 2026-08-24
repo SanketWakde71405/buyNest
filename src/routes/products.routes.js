@@ -1,20 +1,25 @@
 import {
   createProduct,
   getProductById,
-  addImagestoProduct,
+  addProductImages,
+  deleteProductImage,
+  deleteAllProductImages,
   getProductsByBrand,
   getAllProducts,
   deleteProduct,
   updateFeatures,
   getProductsByCategory,
   addProductstoBrand,
-  updateProduct
+  updateProduct,
 } from "../controllers/products.controllers.js";
 import {
   createProductValidator,
   addBulkProducts,
   addImagesToProductValidator,
-  updateFeaturesValidator
+  deleteProductImageValidator,
+  deleteAllProductImagesValidator,
+  updateFeaturesValidator,
+  updateProductValidator,
 } from "../validators/products.validators.js";
 import { validate } from "../middlewares/validator.middleware.js";
 import { upload } from "../middlewares/multer.middleware.js";
@@ -26,10 +31,24 @@ const router = Router();
 
 router
   .route("/add-product")
-  .post(verifyJWT, authorizeRoles(ROLES.ADMIN),createProductValidator(),validate, createProduct);
+  .post(
+    verifyJWT,
+    authorizeRoles(ROLES.ADMIN),
+    createProductValidator(),
+    validate,
+    createProduct,
+  );
+
 router
   .route("/bulk")
-  .post(verifyJWT, authorizeRoles(ROLES.ADMIN),addBulkProducts(),validate, addProductstoBrand);
+  .post(
+    verifyJWT,
+    authorizeRoles(ROLES.ADMIN),
+    addBulkProducts(),
+    validate,
+    addProductstoBrand,
+  );
+
 router
   .route("/add-images")
   .patch(
@@ -38,14 +57,51 @@ router
     upload.array("images", 5),
     addImagesToProductValidator(),
     validate,
-    addImagestoProduct,
+    addProductImages,
   );
+
+router
+  .route("/delete-image")
+  .patch(
+    verifyJWT,
+    authorizeRoles(ROLES.ADMIN),
+    deleteProductImageValidator(),
+    validate,
+    deleteProductImage,
+  );
+
+router
+  .route("/delete-all-images")
+  .patch(
+    verifyJWT,
+    authorizeRoles(ROLES.ADMIN),
+    deleteAllProductImagesValidator(),
+    validate,
+    deleteAllProductImages,
+  );
+
+router
+  .route("/update")
+  .put(
+    verifyJWT,
+    authorizeRoles(ROLES.ADMIN),
+    updateProductValidator(),
+    validate,
+    updateProduct,
+  );
+
 router
   .route("/features")
-  .patch(verifyJWT, authorizeRoles(ROLES.ADMIN),updateFeaturesValidator(),validate, updateFeatures);
+  .patch(
+    verifyJWT,
+    authorizeRoles(ROLES.ADMIN),
+    updateFeaturesValidator(),
+    validate,
+    updateFeatures,
+  );
+
 router.route("/brand").get(verifyJWT, getProductsByBrand);
 router.route("/category").get(verifyJWT, getProductsByCategory);
-router.route("/update").put(verifyJWT,authorizeRoles(ROLES.ADMIN),updateProduct);
 router.route("/").get(verifyJWT, getAllProducts);
 router.route("/:productID").get(verifyJWT, getProductById);
 router

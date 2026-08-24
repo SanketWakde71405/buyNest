@@ -62,3 +62,10 @@ export const deleteFromCloudinary = async (
     return null;
   }
 };
+
+export const extractPublicIdFromUrl = (url) => {
+  if (!url || typeof url !== "string") return null;
+
+  const match = url.match(/\/upload\/(?:v\d+\/)?(.+)\.[a-zA-Z0-9]+$/);
+  return match ? match[1] : null;
+};
