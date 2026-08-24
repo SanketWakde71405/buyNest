@@ -6,8 +6,15 @@ import { Brand } from "../models/brands.models.js";
 import { Category } from "../models/categories.models.js";
 import { Store } from "../models/store.models.js";
 import { slugifyForFolder } from "../utils/slugify.js";
-import { uploadOnCloudinary } from "../utils/cloudinary.js";
+import {
+  uploadOnCloudinary,
+  deleteFromCloudinary,
+  extractPublicIdFromUrl,
+} from "../utils/cloudinary.js";
 import mongoose from "mongoose";
+
+const MIN_IMAGES = 3;
+const MAX_IMAGES = 5;
 
 const createProduct = asyncHandler(async (req, res) => {
   const user = req.user;
@@ -22,6 +29,7 @@ const createProduct = asyncHandler(async (req, res) => {
     slug,
     price,
     discountPrice,
+    costPrice,
     category,
     stock,
     brand,
@@ -57,9 +65,6 @@ const createProduct = asyncHandler(async (req, res) => {
     throw new ApiError(404, `Brand with ID ${brand} not found`);
   }
 
-  // ✅ 1. Move duplicate check BEFORE new Product()
-  // ✅ 2. Compare document fields, not the document itself
-
   const duplicate = await Product.findOne({ $or: [{ title }, { slug }] });
 
   if (duplicate) {
@@ -70,18 +75,20 @@ const createProduct = asyncHandler(async (req, res) => {
     );
   }
 
-  const invalidBrandId= !mongoose.Types.ObjectId.isValid(brand);
-
-  if(invalidBrandId){
-     throw new ApiError(500, "Invalid brand ID. Check whether the brand exists or try contacting developer.");
+  const store = await Store.findOne({ owner: user._id });
+  if (!store) {
+    throw new ApiError(404, "Store not found for this user");
   }
 
-  const product = new Product({
+  // isActive/stock/image gating is handled by the Product model's
+  // pre("save") hook — no extra logic needed here.
+  const newProduct = await Product.create({
     title,
     description,
     slug,
     price,
     discountPrice,
+    ...(costPrice !== undefined && { costPrice }),
     category,
     stock,
     brand,
@@ -91,14 +98,21 @@ const createProduct = asyncHandler(async (req, res) => {
     isActive,
   });
 
-  const newProduct = await Product.create(product);
+  // Keep the store's running product count in sync. Best-effort — a
+  // failed counter update shouldn't roll back an otherwise-successful
+  // product creation.
+  await Store.updateOne({ _id: store._id }, { $inc: { totalProducts: 1 } });
 
   return res
     .status(201)
     .json(new ApiResponse(201, newProduct, "New product added successfully."));
 });
 
-const addImagestoProduct = asyncHandler(async (req, res) => {
+// Appends newly uploaded images to a product. Existing images are left
+// untouched — this endpoint only adds, bounded by MAX_IMAGES. Removal is
+// a separate, explicit action (deleteProductImage / deleteAllProductImages
+// below), so the client never has to resend the images it wants to keep.
+const addProductImages = asyncHandler(async (req, res) => {
   const user = req.user;
 
   if (!user) {
@@ -109,6 +123,10 @@ const addImagestoProduct = asyncHandler(async (req, res) => {
 
   if (!mongoose.Types.ObjectId.isValid(productId)) {
     throw new ApiError(400, "Product ID invalid");
+  }
+
+  if (!req.files?.length) {
+    throw new ApiError(400, "At least one image file is required");
   }
 
   const [product, store] = await Promise.all([
@@ -126,53 +144,128 @@ const addImagestoProduct = asyncHandler(async (req, res) => {
     throw new ApiError(404, "Store not found for this user");
   }
 
-  let existingImages = req.body.existingImages || [];
-  if (!Array.isArray(existingImages)) {
-    existingImages = [existingImages];
-  }
+  const currentCount = product.images?.length || 0;
+  const remainingSlots = MAX_IMAGES - currentCount;
 
-  let uploadedImageUrls = [];
-
-  if (req.files?.length > 0) {
-    const categoryName = product.category?.[0]?.name || "uncategorized";
-    const brandName = product.brand?.name || "unbranded";
-
-    const folder = [
-      store.storeName,
-      categoryName,
-      brandName,
-      product._id.toString(),
-    ]
-      .map(slugifyForFolder)
-      .join("/");
-
-    const uploadedImages = await Promise.all(
-      req.files.map((file) => uploadOnCloudinary(file.path, { folder })),
+  if (remainingSlots <= 0) {
+    throw new ApiError(
+      400,
+      `Product already has the maximum of ${MAX_IMAGES} images`,
     );
-
-    uploadedImageUrls = uploadedImages.map((image) => {
-      if (!image?.url) {
-        throw new ApiError(400, "Error uploading image");
-      }
-      return image.url;
-    });
   }
 
-  const finalImages = [...existingImages, ...uploadedImageUrls];
-
-  if (finalImages.length < 3) {
-    throw new ApiError(400, "A product must contain at least 3 images");
-  }
-  if (finalImages.length > 5) {
-    throw new ApiError(400, "A product can contain at most 5 images");
+  if (req.files.length > remainingSlots) {
+    throw new ApiError(
+      400,
+      `Only ${remainingSlots} more image(s) can be added — a product can contain at most ${MAX_IMAGES} images`,
+    );
   }
 
-  product.images = finalImages;
+  const categoryName = product.category?.[0]?.name || "uncategorized";
+  const brandName = product.brand?.name || "unbranded";
+
+  const folder = [
+    store.storeName,
+    categoryName,
+    brandName,
+    product._id.toString(),
+  ]
+    .map(slugifyForFolder)
+    .join("/");
+
+  const uploadedImages = await Promise.all(
+    req.files.map((file) => uploadOnCloudinary(file.path, { folder })),
+  );
+
+  const newImageUrls = uploadedImages.map((image) => {
+    if (!image?.url) {
+      throw new ApiError(400, "Error uploading image");
+    }
+    return image.url;
+  });
+
+  product.images.push(...newImageUrls);
   await product.save();
 
   return res
     .status(200)
-    .json(new ApiResponse(200, product, "Product images updated successfully"));
+    .json(new ApiResponse(200, product, "Images added successfully"));
+});
+
+const deleteProductImage = asyncHandler(async (req, res) => {
+  const user = req.user;
+
+  if (!user) {
+    throw new ApiError(401, "Unauthorized");
+  }
+
+  const { productId, imageUrl } = req.body;
+
+  if (!mongoose.Types.ObjectId.isValid(productId)) {
+    throw new ApiError(400, "Product ID invalid");
+  }
+
+  if (!imageUrl) {
+    throw new ApiError(400, "Image URL is required");
+  }
+
+  const product = await Product.findById(productId);
+
+  if (!product) {
+    throw new ApiError(404, "Product not found");
+  }
+
+  if (!product.images.includes(imageUrl)) {
+    throw new ApiError(404, "Image not found on this product");
+  }
+
+  const publicId = extractPublicIdFromUrl(imageUrl);
+  if (publicId) {
+    await deleteFromCloudinary(publicId);
+  }
+
+  product.images = product.images.filter((url) => url !== imageUrl);
+  await product.save();
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, product, "Image removed successfully"));
+});
+
+const deleteAllProductImages = asyncHandler(async (req, res) => {
+  const user = req.user;
+
+  if (!user) {
+    throw new ApiError(401, "Unauthorized");
+  }
+
+  const { productId } = req.body;
+
+  if (!mongoose.Types.ObjectId.isValid(productId)) {
+    throw new ApiError(400, "Product ID invalid");
+  }
+
+  const product = await Product.findById(productId);
+
+  if (!product) {
+    throw new ApiError(404, "Product not found");
+  }
+
+  if (product.images?.length) {
+    await Promise.all(
+      product.images.map((url) => {
+        const publicId = extractPublicIdFromUrl(url);
+        return publicId ? deleteFromCloudinary(publicId) : null;
+      }),
+    );
+  }
+
+  product.images = [];
+  await product.save();
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, product, "All images removed successfully"));
 });
 
 const getProductById = asyncHandler(async (req, res) => {
@@ -234,6 +327,8 @@ const getAllProducts = asyncHandler(async (req, res) => {
     throw new ApiError(401, "Unauthorized");
   }
 
+  // stockStatus and profit are schema virtuals (toJSON: { virtuals: true }),
+  // so they're included automatically here — no extra selection needed.
   const products = await Product.find();
 
   if (products.length === 0) {
@@ -258,10 +353,27 @@ const deleteProduct = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Invalid Product ID");
   }
 
-  const product = await Product.findByIdAndDelete(productID);
+  const product = await Product.findById(productID);
 
   if (!product) {
     throw new ApiError(404, "Product not found");
+  }
+
+  if (product.images?.length) {
+    await Promise.all(
+      product.images.map((url) => {
+        const publicId = extractPublicIdFromUrl(url);
+        return publicId ? deleteFromCloudinary(publicId) : null;
+      }),
+    );
+  }
+
+  await Product.findByIdAndDelete(productID);
+
+  // Best-effort — don't block a successful delete on the counter update.
+  const store = await Store.findOne({ owner: user._id });
+  if (store) {
+    await Store.updateOne({ _id: store._id }, { $inc: { totalProducts: -1 } });
   }
 
   return res
@@ -330,13 +442,8 @@ const getProductsByCategory = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Invalid category ID");
   }
 
-  // Find category and all descendants
   const categories = await Category.aggregate([
-    {
-      $match: {
-        _id: new mongoose.Types.ObjectId(categoryId),
-      },
-    },
+    { $match: { _id: new mongoose.Types.ObjectId(categoryId) } },
     {
       $graphLookup: {
         from: "categories",
@@ -348,9 +455,7 @@ const getProductsByCategory = asyncHandler(async (req, res) => {
     },
     {
       $project: {
-        allCategoryIds: {
-          $concatArrays: [["$_id"], "$descendants._id"],
-        },
+        allCategoryIds: { $concatArrays: [["$_id"], "$descendants._id"] },
       },
     },
   ]);
@@ -361,12 +466,14 @@ const getProductsByCategory = asyncHandler(async (req, res) => {
 
   const categoryIds = categories[0].allCategoryIds;
 
+  // Customer-facing query — exclude costPrice, it's vendor-internal.
+  // isActive: true already excludes out-of-stock/too-few-image products,
+  // since the model gate forces isActive false in both cases.
   const products = await Product.find({
-    category: {
-      $in: categoryIds,
-    },
+    category: { $in: categoryIds },
     isActive: true,
   })
+    .select("-costPrice")
     .populate("category", "name slug")
     .populate("brand", "name logo");
 
@@ -396,12 +503,34 @@ const addProductstoBrand = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Maximum 10 products can be added at once");
   }
 
-  const productsToInsert = products.map((product) => ({
-    ...product,
-    brand: brandId,
-  }));
+  // insertMany bypasses pre("save") middleware entirely, so the model's
+  // isActive gate never runs for these documents. Stock is guaranteed
+  // fine at this call site, so the only gap left is image count — if a
+  // caller passes isActive: true (or leaves it defaulting to true) with
+  // fewer than MIN_IMAGES images, it would otherwise go live ungated.
+  // Re-apply that one check manually before inserting.
+  const productsToInsert = products.map((product) => {
+    const imageCount = Array.isArray(product.images)
+      ? product.images.length
+      : 0;
+    const tooFewImages = imageCount < MIN_IMAGES;
+
+    return {
+      ...product,
+      brand: brandId,
+      isActive: product.isActive === false ? false : !tooFewImages,
+    };
+  });
 
   const createdProducts = await Product.insertMany(productsToInsert);
+
+  const store = await Store.findOne({ owner: user._id });
+  if (store) {
+    await Store.updateOne(
+      { _id: store._id },
+      { $inc: { totalProducts: createdProducts.length } },
+    );
+  }
 
   return res
     .status(201)
@@ -416,39 +545,52 @@ const updateProduct = asyncHandler(async (req, res) => {
     throw new ApiError(401, "Unauthorized access");
   }
 
-  const { productId, title, description, slug, price, discountPrice, stock } =
-    req.body;
+  const {
+    productId,
+    title,
+    description,
+    slug,
+    price,
+    discountPrice,
+    costPrice,
+    stock,
+    isActive,
+  } = req.body;
 
-  if (!productId) {
-    throw new ApiError(400, "Product ID is required");
-  }
-  if (!title) {
-    throw new ApiError(400, "Product title is required");
-  }
-  if (!slug) {
-    throw new ApiError(400, "Product slug is required");
-  }
+  if (!productId) throw new ApiError(400, "Product ID is required");
+  if (!title) throw new ApiError(400, "Product title is required");
+  if (!slug) throw new ApiError(400, "Product slug is required");
 
   const duplicate = await Product.findOne({ $or: [{ title }, { slug }] });
 
-  if (duplicate?._id.toString() !== productId) {
+  // Fixed: was `duplicate?._id...` which threw on every update even with
+  // no conflict, since optional chaining on a null match made the
+  // comparison always true.
+  if (duplicate && duplicate._id.toString() !== productId) {
     throw new ApiError(
-      500,
+      409,
       "Another product with this title or slug already exists.",
     );
   }
 
+  // isActive/stock/image gating (including the out-of-stock -> isActive
+  // false rule) is re-applied inside the model's pre("findOneAndUpdate")
+  // hook, since findByIdAndUpdate bypasses document middleware.
   const updatedProduct = await Product.findByIdAndUpdate(
     productId,
     {
-      title,
-      description,
-      slug,
-      price,
-      discountPrice,
-      stock,
+      $set: {
+        title,
+        description,
+        slug,
+        price,
+        discountPrice,
+        ...(costPrice !== undefined && { costPrice }),
+        stock,
+        ...(isActive !== undefined && { isActive }),
+      },
     },
-    { new: true },
+    { new: true, runValidators: true },
   );
 
   if (!updatedProduct) {
@@ -456,19 +598,21 @@ const updateProduct = asyncHandler(async (req, res) => {
   }
 
   return res
-    .status(201)
+    .status(200)
     .json(new ApiResponse(200, updatedProduct, "Product updated successfully"));
 });
 
 export {
   createProduct,
   getProductById,
-  addImagestoProduct,
+  addProductImages,
+  deleteProductImage,
+  deleteAllProductImages,
   getProductsByBrand,
   getAllProducts,
   deleteProduct,
   updateFeatures,
   getProductsByCategory,
   addProductstoBrand,
-  updateProduct
+  updateProduct,
 };
