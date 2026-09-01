@@ -281,9 +281,7 @@ const getProductById = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Product ID invalid");
   }
 
-  const product = await Product.findById(productID).select(
-    "-ratingsAverage -ratingsCount -isActive",
-  );
+  const product = await Product.findById(productID);
 
   if (!product) {
     throw new ApiError(404, "Product not Found");
@@ -539,6 +537,133 @@ const addProductstoBrand = asyncHandler(async (req, res) => {
     );
 });
 
+// Category is an array, so "edit" and "delete" are really the same
+// operation from the model's point of view: the client always sends the
+// complete desired list of category ids (same convention createProduct
+// and updateProduct already use for `category`). Editing means sending a
+// different set; deleting a category off a product means sending the
+// current list with that one id left out. Either way, the one rule that
+// has to hold is the schema's own: a product can never end up with zero
+// categories.
+const updateProductCategories = asyncHandler(async (req, res) => {
+  const user = req.user;
+  if (!user) {
+    throw new ApiError(401, "Unauthorized");
+  }
+
+  const { productId, categoryIds } = req.body;
+
+  if (!mongoose.Types.ObjectId.isValid(productId)) {
+    throw new ApiError(400, "Invalid product ID");
+  }
+
+  if (!Array.isArray(categoryIds) || categoryIds.length === 0) {
+    throw new ApiError(
+      400,
+      "At least one category is required — a product can't be left with zero categories",
+    );
+  }
+
+  const invalidId = categoryIds.find(
+    (id) => !mongoose.Types.ObjectId.isValid(id),
+  );
+  if (invalidId) {
+    throw new ApiError(400, `Invalid category ID: ${invalidId}`);
+  }
+
+  // De-dupe in case the client sends the same id twice.
+  const uniqueCategoryIds = [...new Set(categoryIds)];
+
+  const foundCategories = await Category.find({
+    _id: { $in: uniqueCategoryIds },
+  }).select("_id");
+
+  if (foundCategories.length !== uniqueCategoryIds.length) {
+    const foundIds = new Set(foundCategories.map((c) => c._id.toString()));
+    const missing = uniqueCategoryIds.filter((id) => !foundIds.has(id));
+    throw new ApiError(404, `Category not found: ${missing.join(", ")}`);
+  }
+
+  const updatedProduct = await Product.findByIdAndUpdate(
+    productId,
+    { $set: { category: uniqueCategoryIds } },
+    { new: true, runValidators: true },
+  )
+    .populate("category", "name")
+    .select("-ratingsAverage -ratingsCount -isActive");
+
+  if (!updatedProduct) {
+    throw new ApiError(404, "Product not found");
+  }
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        updatedProduct,
+        "Product categories updated successfully",
+      ),
+    );
+});
+
+// Brand is singular and required on the schema — there's no "delete the
+// brand" state a product can be left in, only "replace it with a
+// different one". A request that tries to clear it (no brandId, or a
+// falsy one) is rejected rather than silently nulling the field out, so
+// "edit" and "delete" both go through this same replace operation: to
+// delete brand A off a product, the caller sends brand B instead.
+const updateProductBrand = asyncHandler(async (req, res) => {
+  const user = req.user;
+  if (!user) {
+    throw new ApiError(401, "Unauthorized");
+  }
+
+  const { productId, brandId } = req.body;
+
+  if (!mongoose.Types.ObjectId.isValid(productId)) {
+    throw new ApiError(400, "Invalid product ID");
+  }
+
+  if (!brandId) {
+    throw new ApiError(
+      400,
+      "A product must have a brand — provide a new brand ID to replace the current one instead of removing it",
+    );
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(brandId)) {
+    throw new ApiError(400, "Invalid brand ID");
+  }
+
+  const brandExists = await Brand.findById(brandId).select("_id");
+  if (!brandExists) {
+    throw new ApiError(404, `Brand with ID ${brandId} not found`);
+  }
+
+  const updatedProduct = await Product.findByIdAndUpdate(
+    productId,
+    { $set: { brand: brandId } },
+    { new: true, runValidators: true },
+  )
+    .populate("brand", "name")
+    .select("-ratingsAverage -ratingsCount -isActive");
+
+  if (!updatedProduct) {
+    throw new ApiError(404, "Product not found");
+  }
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        updatedProduct,
+        "Product brand updated successfully",
+      ),
+    );
+});
+
 const updateProduct = asyncHandler(async (req, res) => {
   const user = req.user;
   if (!user) {
@@ -615,4 +740,6 @@ export {
   getProductsByCategory,
   addProductstoBrand,
   updateProduct,
+  updateProductCategories,
+  updateProductBrand,
 };
