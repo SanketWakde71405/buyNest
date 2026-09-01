@@ -10,16 +10,16 @@ const LOW_STOCK_THRESHOLD = 10;
 const HIGH_STOCK_THRESHOLD = 20;
 
 export const STOCK_STATUS = {
-  ACTIVE: "active",
-  LOW_STOCK: "low_stock",
-  INACTIVE: "inactive",
+  IN_STOCK: "In Stock",
+  LOW_STOCK: "Low Stock",
+  OUT_OF_STOCK: "Out of Stock",
 };
 
 function classifyStock(stock) {
   if (stock == null) return null;
-  if (stock < LOW_STOCK_THRESHOLD) return STOCK_STATUS.INACTIVE;
+  if (stock < LOW_STOCK_THRESHOLD) return STOCK_STATUS.OUT_OF_STOCK;
   if (stock < HIGH_STOCK_THRESHOLD) return STOCK_STATUS.LOW_STOCK;
-  return STOCK_STATUS.ACTIVE;
+  return STOCK_STATUS.IN_STOCK;
 }
 
 const productSchema = new Schema(

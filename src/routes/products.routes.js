@@ -11,6 +11,8 @@ import {
   getProductsByCategory,
   addProductstoBrand,
   updateProduct,
+  updateProductCategories,
+  updateProductBrand,
 } from "../controllers/products.controllers.js";
 import {
   createProductValidator,
@@ -100,6 +102,8 @@ router
     updateFeatures,
   );
 
+router.route("/categories").patch(verifyJWT, updateProductCategories);
+router.route("/brand").patch(verifyJWT, updateProductBrand);
 router.route("/brand").get(verifyJWT, getProductsByBrand);
 router.route("/category").get(verifyJWT, getProductsByCategory);
 router.route("/").get(verifyJWT, getAllProducts);
