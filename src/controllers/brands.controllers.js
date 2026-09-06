@@ -3,6 +3,7 @@ import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { Brand } from "../models/brands.models.js";
 import { Category } from "../models/categories.models.js";
+import { Supplier } from "../models/supplier.models.js";
 import { Product } from "../models/products.models.js";
 import { Store } from "../models/store.models.js";
 import { slugifyForFolder } from "../utils/slugify.js";
@@ -12,6 +13,51 @@ import {
 } from "../utils/cloudinary.js";
 import mongoose from "mongoose";
 
+const resolveOrCreateSupplier = async (supplierInput, session) => {
+  if (!supplierInput) {
+    return null;
+  }
+
+  if (typeof supplierInput === "string") {
+    if (!mongoose.Types.ObjectId.isValid(supplierInput)) {
+      throw new ApiError(400, "Supplier ID invalid");
+    }
+    const existing = await Supplier.findById(supplierInput).session(session);
+    if (!existing) {
+      throw new ApiError(400, "Supplier not found");
+    }
+    return existing._id;
+  }
+
+  if (typeof supplierInput === "object") {
+    const { supplierName, contactPerson, contactDetails, pendingAmount } =
+      supplierInput;
+
+    if (!supplierName) {
+      throw new ApiError(
+        400,
+        "Supplier name is required to create a new supplier",
+      );
+    }
+
+    const existingByName = await Supplier.findOne({ supplierName }).session(
+      session,
+    );
+    if (existingByName) {
+      return existingByName._id;
+    }
+
+    // create() with a session needs the array + { session } form
+    const [newSupplier] = await Supplier.create(
+      [{ supplierName, contactPerson, contactDetails, pendingAmount }],
+      { session },
+    );
+    return newSupplier._id;
+  }
+
+  throw new ApiError(400, "Invalid supplier payload");
+};
+
 const createBrand = asyncHandler(async (req, res) => {
   const user = req.user;
 
@@ -19,44 +65,74 @@ const createBrand = asyncHandler(async (req, res) => {
     throw new ApiError(401, "Unauthorized");
   }
 
-  const { name, slug, description, categories } = req.body;
-  if (!name || !slug) {
-    throw new ApiError(400, "Name and slug are required");
-  }
-
-  // Check for duplicate name or slug
-  const duplicate = await Brand.findOne({
-    $or: [{ name }, { slug }],
-  });
-
-  if (duplicate) {
-    const conflictField = duplicate.name === name ? "name" : "slug";
-    throw new ApiError(
-      409,
-      `A brand with this ${conflictField} already exists`,
-    );
-  }
-
-  if (categories && categories.length > 0) {
-    const existingCategories = await Category.find({
-      _id: { $in: categories },
-    });
-
-    if (existingCategories.length !== categories.length) {
-      throw new ApiError(400, "One or more categories are invalid");
-    }
-  }
-
-  const brand = await Brand.create({
+  const {
     name,
     slug,
     description,
     categories,
-  });
+    supplier,
+    website,
+    countryOfOrigin,
+    yearEstablished,
+  } = req.body;
+  if (!name || !slug) {
+    throw new ApiError(400, "Name and slug are required");
+  }
+
+  const session = await mongoose.startSession();
+  let createdBrand;
+
+  try {
+    await session.withTransaction(async () => {
+      const duplicate = await Brand.findOne({
+        $or: [{ name }, { slug }],
+      }).session(session);
+
+      if (duplicate) {
+        const conflictField = duplicate.name === name ? "name" : "slug";
+        throw new ApiError(
+          409,
+          `A brand with this ${conflictField} already exists`,
+        );
+      }
+
+      if (categories && categories.length > 0) {
+        const existingCategories = await Category.find({
+          _id: { $in: categories },
+        }).session(session);
+
+        if (existingCategories.length !== categories.length) {
+          throw new ApiError(400, "One or more categories are invalid");
+        }
+      }
+
+      const supplierId = await resolveOrCreateSupplier(supplier, session);
+
+      const [brand] = await Brand.create(
+        [
+          {
+            name,
+            slug,
+            description,
+            categories,
+            supplier: supplierId,
+            website,
+            countryOfOrigin,
+            yearEstablished,
+          },
+        ],
+        { session },
+      );
+
+      createdBrand = brand;
+    });
+  } finally {
+    await session.endSession();
+  }
 
   return res
     .status(201)
-    .json(new ApiResponse(201, brand, "Brand created successfully"));
+    .json(new ApiResponse(201, createdBrand, "Brand created successfully"));
 });
 
 const updateBrandLogo = asyncHandler(async (req, res) => {
@@ -131,40 +207,85 @@ const updateBrandDetails = asyncHandler(async (req, res) => {
   }
 
   const { brandId } = req.params;
-  const { name, slug, description } = req.body;
+  const {
+    name,
+    slug,
+    description,
+    supplier,
+    website,
+    countryOfOrigin,
+    yearEstablished,
+  } = req.body;
 
   if (!brandId) {
     throw new ApiError(400, "Brand ID is required");
   }
 
-  if (!name && !slug && !description) {
+  if (
+    !name &&
+    !slug &&
+    !description &&
+    supplier === undefined &&
+    website === undefined &&
+    countryOfOrigin === undefined &&
+    yearEstablished === undefined
+  ) {
     throw new ApiError(
       400,
-      "At least one field (name, slug, description) must be provided for update",
+      "At least one field (name, slug, description, website, countryOfOrigin, yearEstablished, supplier) must be provided for update",
     );
   }
 
-  const duplicate = await Brand.findOne({
-    $or: [{ name }, { slug }],
-    _id: { $ne: brandId },
-  });
+  const session = await mongoose.startSession();
+  let updatedBrand;
 
-  if (duplicate) {
-    const conflictField = duplicate.name === name ? "name" : "slug";
-    throw new ApiError(
-      409,
-      `A brand with this ${conflictField} already exists`,
-    );
-  }
+  try {
+    await session.withTransaction(async () => {
+      const duplicate = await Brand.findOne({
+        $or: [{ name }, { slug }],
+        _id: { $ne: brandId },
+      }).session(session);
 
-  const updatedBrand = await Brand.findByIdAndUpdate(
-    brandId,
-    { $set: { name, slug, description } },
-    { new: true },
-  ).select("-categories");
+      if (duplicate) {
+        const conflictField = duplicate.name === name ? "name" : "slug";
+        throw new ApiError(
+          409,
+          `A brand with this ${conflictField} already exists`,
+        );
+      }
 
-  if (!updatedBrand) {
-    throw new ApiError(404, `Brand with ID ${brandId} not found`);
+      const updateFields = {};
+      if (name !== undefined) updateFields.name = name;
+      if (slug !== undefined) updateFields.slug = slug;
+      if (description !== undefined) updateFields.description = description;
+      if (website !== undefined) updateFields.website = website;
+      if (countryOfOrigin !== undefined)
+        updateFields.countryOfOrigin = countryOfOrigin;
+      if (yearEstablished !== undefined)
+        updateFields.yearEstablished = yearEstablished;
+
+      if (supplier !== undefined) {
+        // Explicit null means "unlink the supplier"
+        updateFields.supplier =
+          supplier === null
+            ? null
+            : await resolveOrCreateSupplier(supplier, session);
+      }
+
+      const brand = await Brand.findByIdAndUpdate(
+        brandId,
+        { $set: updateFields },
+        { new: true, session },
+      ).select("-categories");
+
+      if (!brand) {
+        throw new ApiError(404, `Brand with ID ${brandId} not found`);
+      }
+
+      updatedBrand = brand;
+    });
+  } finally {
+    await session.endSession();
   }
 
   return res
@@ -191,12 +312,35 @@ const getAllBrands = asyncHandler(async (req, res) => {
       },
     },
     {
+      $lookup: {
+        from: "suppliers",
+        localField: "supplier",
+        foreignField: "_id",
+        as: "supplier",
+      },
+    },
+    {
+      $unwind: {
+        path: "$supplier",
+        preserveNullAndEmptyArrays: true, // supplier is optional
+      },
+    },
+    {
       $project: {
         name: 1,
         slug: 1,
         description: 1,
         logo: 1,
+        website: 1,
+        countryOfOrigin: 1,
+        yearEstablished: 1,
         categories: "$categories.name",
+        supplier: {
+          _id: "$supplier._id",
+          supplierName: "$supplier.supplierName",
+        },
+        createdAt: 1,
+        updatedAt: 1,
       },
     },
   ]);
@@ -219,7 +363,9 @@ const getBrandById = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Brand ID is required");
   }
 
-  const brand = await Brand.findById(brandId).populate("categories", "name");
+  const brand = await Brand.findById(brandId)
+    .populate("categories", "name")
+    .populate("supplier");
 
   if (!brand) {
     throw new ApiError(404, `Brand with ID ${brandId} not found`);

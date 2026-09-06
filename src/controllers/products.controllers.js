@@ -537,14 +537,7 @@ const addProductstoBrand = asyncHandler(async (req, res) => {
     );
 });
 
-// Category is an array, so "edit" and "delete" are really the same
-// operation from the model's point of view: the client always sends the
-// complete desired list of category ids (same convention createProduct
-// and updateProduct already use for `category`). Editing means sending a
-// different set; deleting a category off a product means sending the
-// current list with that one id left out. Either way, the one rule that
-// has to hold is the schema's own: a product can never end up with zero
-// categories.
+
 const updateProductCategories = asyncHandler(async (req, res) => {
   const user = req.user;
   if (!user) {
@@ -607,12 +600,6 @@ const updateProductCategories = asyncHandler(async (req, res) => {
     );
 });
 
-// Brand is singular and required on the schema — there's no "delete the
-// brand" state a product can be left in, only "replace it with a
-// different one". A request that tries to clear it (no brandId, or a
-// falsy one) is rejected rather than silently nulling the field out, so
-// "edit" and "delete" both go through this same replace operation: to
-// delete brand A off a product, the caller sends brand B instead.
 const updateProductBrand = asyncHandler(async (req, res) => {
   const user = req.user;
   if (!user) {
@@ -688,9 +675,6 @@ const updateProduct = asyncHandler(async (req, res) => {
 
   const duplicate = await Product.findOne({ $or: [{ title }, { slug }] });
 
-  // Fixed: was `duplicate?._id...` which threw on every update even with
-  // no conflict, since optional chaining on a null match made the
-  // comparison always true.
   if (duplicate && duplicate._id.toString() !== productId) {
     throw new ApiError(
       409,
@@ -698,9 +682,6 @@ const updateProduct = asyncHandler(async (req, res) => {
     );
   }
 
-  // isActive/stock/image gating (including the out-of-stock -> isActive
-  // false rule) is re-applied inside the model's pre("findOneAndUpdate")
-  // hook, since findByIdAndUpdate bypasses document middleware.
   const updatedProduct = await Product.findByIdAndUpdate(
     productId,
     {
