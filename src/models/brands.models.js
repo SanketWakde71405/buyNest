@@ -1,4 +1,5 @@
 import mongoose, { Schema } from "mongoose";
+
 const brandSchema = new Schema(
   {
     name: {
@@ -24,12 +25,33 @@ const brandSchema = new Schema(
       type: String,
       default: null,
     },
+    website: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    countryOfOrigin: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    yearEstablished: {
+      type: Number,
+      min: 1500,
+      max: new Date().getFullYear(),
+      default: null,
+    },
     categories: [
       {
         type: Schema.Types.ObjectId,
         ref: "Category",
       },
     ],
+    supplier: {
+      type: Schema.Types.ObjectId,
+      ref: "Supplier",
+      default: null, // not required — a brand can exist without a supplier
+    },
   },
   {
     timestamps: true,
