@@ -5,6 +5,8 @@ import {
   getMyStore,
   addStoreLogo,
   updateStoreSettings,
+  addCategoriesToStore,
+  removeCategoriesFromStore
 } from "../controllers/store.controllers.js";
 
 import { verifyJWT, authorizeRoles } from "../middlewares/auth.middleware.js";
@@ -40,6 +42,21 @@ router
     authorizeRoles(ROLES.ADMIN),
     attachStore,
     updateStoreSettings,
+  );
+
+router
+  .route("/categories")
+  .patch(
+    verifyJWT,
+    authorizeRoles(ROLES.ADMIN),
+    attachStore,
+    addCategoriesToStore,
+  )
+  .delete(
+    verifyJWT,
+    authorizeRoles(ROLES.ADMIN),
+    attachStore,
+    removeCategoriesFromStore,
   );
 
 // Must come before "/:storeId" — otherwise Express matches "me" as a

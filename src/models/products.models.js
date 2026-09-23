@@ -47,10 +47,7 @@ const productSchema = new Schema(
       type: Number,
       required: true,
     },
-    // What the vendor paid to acquire the item. Used to compute `profit`
-    // below — never exposed on customer-facing routes (excluded via
-    // .select("-costPrice") in getProductsByCategory and anywhere else
-    // that serves the storefront).
+   
     costPrice: {
       type: Number,
     },
@@ -101,30 +98,18 @@ const productSchema = new Schema(
   },
 );
 
-// Computed, not stored, so it's always derived from the current
-// price/costPrice rather than going stale. Returns null when costPrice
-// hasn't been set yet (e.g. older products created before this field
-// existed) rather than a misleading number.
 productSchema.virtual("profit").get(function () {
   if (this.costPrice == null) return null;
   const sellingPrice = this.discountPrice ?? this.price;
   return sellingPrice - this.costPrice;
 });
 
-// Purely derived from `stock` — always accurate, no hook needed to keep
-// it in sync. Distinct from `isActive`: this is a stock-level label,
-// isActive is the actual listability flag (gated on both stock and
-// image count below).
+
 productSchema.virtual("stockStatus").get(function () {
   return classifyStock(this.stock);
 });
 
-// Covers .save() calls — addProductImages, deleteProductImage,
-// deleteAllProductImages, and createProduct all go through this.
-// isActive is forced false if the product is out of stock OR doesn't
-// have enough images. It's never forced back to true here — that only
-// happens if the caller explicitly sets isActive: true again once both
-// conditions clear.
+
 productSchema.pre("save", function () {
   const outOfStock = this.stock != null && this.stock < LOW_STOCK_THRESHOLD;
   const tooFewImages = (this.images?.length || 0) < MIN_ACTIVE_IMAGES;
@@ -134,11 +119,6 @@ productSchema.pre("save", function () {
   }
 });
 
-// findByIdAndUpdate/findOneAndUpdate (used by updateProduct) bypass
-// document middleware entirely, so the same gate needs to be re-applied
-// here — otherwise an admin could flip isActive: true, or drop stock
-// below the threshold, straight through the update endpoint without
-// isActive reacting.
 productSchema.pre("findOneAndUpdate", async function () {
   const update = this.getUpdate() || {};
   const setBlock = update.$set || update;
@@ -147,14 +127,11 @@ productSchema.pre("findOneAndUpdate", async function () {
   const imagesChanging = Array.isArray(setBlock.images);
   const settingActiveTrue = setBlock.isActive === true;
 
-  // Nothing that could affect the isActive gate is happening — skip the
-  // extra DB round trip.
+  
   if (!stockChanging && !imagesChanging && !settingActiveTrue) {
     return ;
   }
 
-  // Need the current stock/images if this update doesn't touch them, to
-  // know what the resulting state will be.
   let current = null;
   if (!stockChanging || !imagesChanging) {
     current = await this.model.findOne(this.getQuery()).select("stock images");
@@ -173,6 +150,77 @@ productSchema.pre("findOneAndUpdate", async function () {
   }
 
 
+});
+
+
+productSchema.post("save", async function (doc) {
+  const Category = mongoose.model("Category");
+  await Category.syncStatus(doc.category);
+});
+
+productSchema.pre("findOneAndUpdate", async function () {
+  const update = this.getUpdate() || {};
+  const setBlock = update.$set || update;
+
+  if (setBlock.category === undefined) {
+    this._categorySyncSkipped = true;
+    return;
+  }
+
+  const existing = await this.model
+    .findOne(this.getQuery())
+    .select("category");
+  this._previousCategories = existing?.category || [];
+});
+
+productSchema.post("findOneAndUpdate", async function (doc) {
+  if (this._categorySyncSkipped) return;
+
+  const Category = mongoose.model("Category");
+  const previous = this._previousCategories || [];
+  const current = doc?.category || [];
+  await Category.syncStatus([...previous, ...current]);
+});
+
+// Single-document delete via .deleteOne() on a fetched document.
+productSchema.pre(
+  "deleteOne",
+  { document: true, query: false },
+  function () {
+    this._deletedCategories = this.category;
+  },
+);
+
+productSchema.post(
+  "deleteOne",
+  { document: true, query: false },
+  async function () {
+    const Category = mongoose.model("Category");
+    await Category.syncStatus(this._deletedCategories);
+  },
+);
+
+productSchema.pre("findOneAndDelete", async function () {
+  const existing = await this.model
+    .findOne(this.getQuery())
+    .select("category");
+  this._deletedCategories = existing?.category || [];
+});
+
+productSchema.post("findOneAndDelete", async function () {
+  const Category = mongoose.model("Category");
+  await Category.syncStatus(this._deletedCategories);
+});
+
+// Bulk delete — this is what deleteCategory's Product.deleteMany() uses.
+productSchema.pre("deleteMany", async function () {
+  const docs = await this.model.find(this.getFilter()).select("category");
+  this._deletedCategories = docs.flatMap((d) => d.category);
+});
+
+productSchema.post("deleteMany", async function () {
+  const Category = mongoose.model("Category");
+  await Category.syncStatus(this._deletedCategories);
 });
 
 export const Product = mongoose.model("Product", productSchema);

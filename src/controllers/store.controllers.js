@@ -265,6 +265,91 @@ const updateStoreSettings = asyncHandler(async (req, res) => {
     );
 });
 
+const addCategoriesToStore = asyncHandler(async (req, res) => {
+  // Resolved once by the attachStore middleware.
+  const store = req.store;
+
+  const { categories } = req.body;
+
+  if (!Array.isArray(categories) || categories.length === 0) {
+    throw new ApiError(400, "Categories array is required");
+  }
+
+  const invalidIds = categories.filter(
+    (id) => !mongoose.Types.ObjectId.isValid(id),
+  );
+
+  if (invalidIds.length > 0) {
+    throw new ApiError(400, "One or more category IDs are invalid.");
+  }
+
+  const existingCategories = await Category.find({
+    _id: { $in: categories },
+  }).select("_id");
+
+  if (existingCategories.length !== categories.length) {
+    throw new ApiError(404, "One or more selected categories do not exist.");
+  }
+
+  const updatedStore = await Store.findByIdAndUpdate(
+    store._id,
+    { $addToSet: { categories: { $each: categories } } },
+    { new: true },
+  ).populate("categories", "name");
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        updatedStore,
+        "Categories added to store successfully.",
+      ),
+    );
+});
+
+const removeCategoriesFromStore = asyncHandler(async (req, res) => {
+  // Resolved once by the attachStore middleware.
+  const store = req.store;
+
+  const { categories } = req.body;
+
+  if (!Array.isArray(categories) || categories.length === 0) {
+    throw new ApiError(400, "Categories array is required");
+  }
+
+  const invalidIds = categories.filter(
+    (id) => !mongoose.Types.ObjectId.isValid(id),
+  );
+
+  if (invalidIds.length > 0) {
+    throw new ApiError(400, "One or more category IDs are invalid.");
+  }
+
+  const updatedStore = await Store.findByIdAndUpdate(
+    store._id,
+    { $pull: { categories: { $in: categories } } },
+    { new: true },
+  ).populate("categories", "name");
+
+  if (updatedStore.categories.length === 0) {
+    throw new ApiError(
+      400,
+      "Cannot remove the last category — a store must have at least one category.",
+    );
+  }
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        updatedStore,
+        "Categories removed from store successfully.",
+      ),
+    );
+});
+
 export {
   createStore,
   addStoreLogo,
@@ -272,4 +357,6 @@ export {
   getMyStore,
   updateStoreDetails,
   updateStoreSettings,
+  addCategoriesToStore,
+  removeCategoriesFromStore,
 };
