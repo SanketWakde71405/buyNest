@@ -105,11 +105,11 @@ router
 router.route("/categories").patch(verifyJWT, updateProductCategories);
 router.route("/brand").patch(verifyJWT, updateProductBrand);
 router.route("/brand").get(verifyJWT, getProductsByBrand);
-router.route("/category").get(verifyJWT, getProductsByCategory);
 router.route("/").get(verifyJWT, getAllProducts);
 router.route("/:productID").get(verifyJWT, getProductById);
 router
-  .route("/:productID")
-  .delete(verifyJWT, authorizeRoles(ROLES.ADMIN), deleteProduct);
+.route("/:productID")
+.delete(verifyJWT, authorizeRoles(ROLES.ADMIN), deleteProduct);
+router.route("/category/:categoryId").get(verifyJWT, getProductsByCategory);
 
 export default router;

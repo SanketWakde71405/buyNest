@@ -103,6 +103,10 @@ const createProduct = asyncHandler(async (req, res) => {
   // product creation.
   await Store.updateOne({ _id: store._id }, { $inc: { totalProducts: 1 } });
 
+  // Recompute status for every category this product was assigned to (and,
+  // per Category.syncStatus, their ancestors too).
+  await Category.syncStatus(newProduct.category);
+
   return res
     .status(201)
     .json(new ApiResponse(201, newProduct, "New product added successfully."));
@@ -368,6 +372,10 @@ const deleteProduct = asyncHandler(async (req, res) => {
 
   await Product.findByIdAndDelete(productID);
 
+  // The product's category link is gone now — resync status for every
+  // category it used to belong to (findByIdAndDelete skips save hooks).
+  await Category.syncStatus(product.category);
+
   // Best-effort — don't block a successful delete on the counter update.
   const store = await Store.findOne({ owner: user._id });
   if (store) {
@@ -434,7 +442,7 @@ const getProductsByCategory = asyncHandler(async (req, res) => {
     throw new ApiError(401, "Unauthorized");
   }
 
-  const { categoryId } = req.body;
+  const { categoryId } = req.params;
 
   if (!mongoose.Types.ObjectId.isValid(categoryId)) {
     throw new ApiError(400, "Invalid category ID");
@@ -464,14 +472,9 @@ const getProductsByCategory = asyncHandler(async (req, res) => {
 
   const categoryIds = categories[0].allCategoryIds;
 
-  // Customer-facing query — exclude costPrice, it's vendor-internal.
-  // isActive: true already excludes out-of-stock/too-few-image products,
-  // since the model gate forces isActive false in both cases.
   const products = await Product.find({
     category: { $in: categoryIds },
-    isActive: true,
   })
-    .select("-costPrice")
     .populate("category", "name slug")
     .populate("brand", "name logo");
 
@@ -501,12 +504,6 @@ const addProductstoBrand = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Maximum 10 products can be added at once");
   }
 
-  // insertMany bypasses pre("save") middleware entirely, so the model's
-  // isActive gate never runs for these documents. Stock is guaranteed
-  // fine at this call site, so the only gap left is image count — if a
-  // caller passes isActive: true (or leaves it defaulting to true) with
-  // fewer than MIN_IMAGES images, it would otherwise go live ungated.
-  // Re-apply that one check manually before inserting.
   const productsToInsert = products.map((product) => {
     const imageCount = Array.isArray(product.images)
       ? product.images.length
@@ -530,13 +527,18 @@ const addProductstoBrand = asyncHandler(async (req, res) => {
     );
   }
 
+  // insertMany also bypasses post("save"), so category status isn't synced
+  // automatically the way createProduct's Product.create() gets it — do it
+  // explicitly here for every category referenced by the inserted products.
+  const insertedCategoryIds = createdProducts.flatMap((p) => p.category);
+  await Category.syncStatus(insertedCategoryIds);
+
   return res
     .status(201)
     .json(
       new ApiResponse(201, createdProducts, "Products created successfully"),
     );
 });
-
 
 const updateProductCategories = asyncHandler(async (req, res) => {
   const user = req.user;
@@ -567,6 +569,16 @@ const updateProductCategories = asyncHandler(async (req, res) => {
   // De-dupe in case the client sends the same id twice.
   const uniqueCategoryIds = [...new Set(categoryIds)];
 
+  const existingProduct = await Product.findById(productId).select("category");
+
+  if (!existingProduct) {
+    throw new ApiError(404, "Product not found");
+  }
+
+  const previousCategoryIds = (existingProduct.category || []).map((id) =>
+    id.toString(),
+  );
+
   const foundCategories = await Category.find({
     _id: { $in: uniqueCategoryIds },
   }).select("_id");
@@ -588,6 +600,13 @@ const updateProductCategories = asyncHandler(async (req, res) => {
   if (!updatedProduct) {
     throw new ApiError(404, "Product not found");
   }
+
+  // Resync status for every category on either side of this change — ones
+  // the product left may have just lost their last product, and ones it
+  // joined may have just gained their first.
+  await Category.syncStatus([
+    ...new Set([...previousCategoryIds, ...uniqueCategoryIds]),
+  ]);
 
   return res
     .status(200)
