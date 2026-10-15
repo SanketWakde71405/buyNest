@@ -47,10 +47,6 @@ const productSchema = new Schema(
       type: Number,
       required: true,
     },
-   
-    costPrice: {
-      type: Number,
-    },
     category: {
       type: [{ type: mongoose.Schema.Types.ObjectId, ref: "Category" }],
       required: true,
@@ -68,6 +64,39 @@ const productSchema = new Schema(
       ref: "Brand",
       required: true,
     },
+    // Every supplier that provides this specific product, each with their
+    // own cost/terms. Independent of Brand.supplier, which is just a
+    // brand's single "official" distributor and says nothing about which
+    // supplier(s) actually provide this product — a supplier can provide
+    // only some of a brand's catalog, and a product can have more than one.
+    suppliers: [
+      {
+        supplier: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Supplier",
+          required: true,
+        },
+        costPrice: {
+          type: Number,
+          required: true,
+          min: 0,
+        },
+        leadTimeDays: {
+          type: Number,
+          min: 0,
+        },
+        minOrderQty: {
+          type: Number,
+          min: 1,
+        },
+        // Exactly one entry should be true — see the pre("save") guard
+        // below, which also auto-assigns it when there's only one supplier.
+        isPrimary: {
+          type: Boolean,
+          default: false,
+        },
+      },
+    ],
     images: [
       {
         type: String,
@@ -98,17 +127,29 @@ const productSchema = new Schema(
   },
 );
 
+// Supplier-side lookups ("which products does this supplier provide?",
+// and the cleanup when a supplier is deleted) query this array path.
+productSchema.index({ "suppliers.supplier": 1 });
+
 productSchema.virtual("profit").get(function () {
-  if (this.costPrice == null) return null;
+  const primary =
+    this.suppliers?.find((s) => s.isPrimary) || this.suppliers?.[0];
+  if (!primary) return null;
   const sellingPrice = this.discountPrice ?? this.price;
-  return sellingPrice - this.costPrice;
+  return sellingPrice - primary.costPrice;
 });
 
+// Convenience virtual — most of the UI only cares about "the" cost price
+// (e.g. for a quick display), which is the primary supplier's costPrice.
+productSchema.virtual("costPrice").get(function () {
+  const primary =
+    this.suppliers?.find((s) => s.isPrimary) || this.suppliers?.[0];
+  return primary?.costPrice ?? null;
+});
 
 productSchema.virtual("stockStatus").get(function () {
   return classifyStock(this.stock);
 });
-
 
 productSchema.pre("save", function () {
   const outOfStock = this.stock != null && this.stock < LOW_STOCK_THRESHOLD;
@@ -116,6 +157,24 @@ productSchema.pre("save", function () {
 
   if (this.isActive && (outOfStock || tooFewImages)) {
     this.isActive = false;
+  }
+});
+
+// Keeps `suppliers` internally consistent: no supplier listed twice, and
+// exactly one entry marked primary (auto-assigned when there's just one).
+productSchema.pre("save", function () {
+  if (!this.suppliers?.length) return;
+
+  const ids = this.suppliers.map((s) => s.supplier.toString());
+  if (new Set(ids).size !== ids.length) {
+    throw new Error("A product cannot list the same supplier twice.");
+  }
+
+  const primaryCount = this.suppliers.filter((s) => s.isPrimary).length;
+  if (primaryCount === 0) {
+    this.suppliers[0].isPrimary = true;
+  } else if (primaryCount > 1) {
+    throw new Error("Only one supplier can be marked as primary.");
   }
 });
 
@@ -127,9 +186,8 @@ productSchema.pre("findOneAndUpdate", async function () {
   const imagesChanging = Array.isArray(setBlock.images);
   const settingActiveTrue = setBlock.isActive === true;
 
-  
   if (!stockChanging && !imagesChanging && !settingActiveTrue) {
-    return ;
+    return;
   }
 
   let current = null;
@@ -142,16 +200,14 @@ productSchema.pre("findOneAndUpdate", async function () {
     ? setBlock.images.length
     : current?.images?.length || 0;
 
-  const outOfStock = resultingStock != null && resultingStock < LOW_STOCK_THRESHOLD;
+  const outOfStock =
+    resultingStock != null && resultingStock < LOW_STOCK_THRESHOLD;
   const tooFewImages = resultingImageCount < MIN_ACTIVE_IMAGES;
 
   if (outOfStock || tooFewImages) {
     setBlock.isActive = false;
   }
-
-
 });
-
 
 productSchema.post("save", async function (doc) {
   const Category = mongoose.model("Category");
@@ -167,9 +223,7 @@ productSchema.pre("findOneAndUpdate", async function () {
     return;
   }
 
-  const existing = await this.model
-    .findOne(this.getQuery())
-    .select("category");
+  const existing = await this.model.findOne(this.getQuery()).select("category");
   this._previousCategories = existing?.category || [];
 });
 
@@ -183,13 +237,9 @@ productSchema.post("findOneAndUpdate", async function (doc) {
 });
 
 // Single-document delete via .deleteOne() on a fetched document.
-productSchema.pre(
-  "deleteOne",
-  { document: true, query: false },
-  function () {
-    this._deletedCategories = this.category;
-  },
-);
+productSchema.pre("deleteOne", { document: true, query: false }, function () {
+  this._deletedCategories = this.category;
+});
 
 productSchema.post(
   "deleteOne",
@@ -201,9 +251,7 @@ productSchema.post(
 );
 
 productSchema.pre("findOneAndDelete", async function () {
-  const existing = await this.model
-    .findOne(this.getQuery())
-    .select("category");
+  const existing = await this.model.findOne(this.getQuery()).select("category");
   this._deletedCategories = existing?.category || [];
 });
 

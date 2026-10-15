@@ -86,18 +86,13 @@ categorySchema.statics.reorderSiblings = async function (parentId, orderedIds) {
 };
 
 categorySchema.statics.syncStatus = async function (categoryIds) {
+
   const ids = (categoryIds || [])
     .filter(Boolean)
-    .map((id) =>
-      typeof id === "string" ? new mongoose.Types.ObjectId(id) : id,
-    );
+    .map((id) => new mongoose.Types.ObjectId(id._id ?? id));
 
   if (ids.length === 0) return;
 
-  // A category counts as "active" if it — or ANY of its descendants — has
-  // at least one product. So a change to one category's product count can
-  // also flip the status of everything above it in the tree, even though
-  // those ancestors themselves didn't change. Find them first.
   const withAncestors = await this.aggregate([
     { $match: { _id: { $in: ids } } },
     {

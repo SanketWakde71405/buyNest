@@ -13,6 +13,7 @@ import {
   updateProduct,
   updateProductCategories,
   updateProductBrand,
+  updateProductSuppliers,
 } from "../controllers/products.controllers.js";
 import {
   createProductValidator,
@@ -102,14 +103,18 @@ router
     updateFeatures,
   );
 
+router
+  .route("/suppliers")
+  .patch(verifyJWT, authorizeRoles(ROLES.ADMIN), updateProductSuppliers);
+
 router.route("/categories").patch(verifyJWT, updateProductCategories);
 router.route("/brand").patch(verifyJWT, updateProductBrand);
 router.route("/brand").get(verifyJWT, getProductsByBrand);
 router.route("/").get(verifyJWT, getAllProducts);
 router.route("/:productID").get(verifyJWT, getProductById);
 router
-.route("/:productID")
-.delete(verifyJWT, authorizeRoles(ROLES.ADMIN), deleteProduct);
+  .route("/:productID")
+  .delete(verifyJWT, authorizeRoles(ROLES.ADMIN), deleteProduct);
 router.route("/category/:categoryId").get(verifyJWT, getProductsByCategory);
 
 export default router;
