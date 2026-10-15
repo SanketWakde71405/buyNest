@@ -3,6 +3,7 @@ import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { Product } from "../models/products.models.js";
 import { Brand } from "../models/brands.models.js";
+import { Supplier } from "../models/supplier.models.js";
 import { Category } from "../models/categories.models.js";
 import { Store } from "../models/store.models.js";
 import { slugifyForFolder } from "../utils/slugify.js";
@@ -15,6 +16,101 @@ import mongoose from "mongoose";
 
 const MIN_IMAGES = 3;
 const MAX_IMAGES = 5;
+
+// Fields of a linked supplier that the UI needs to render the supplier
+// rows on a product (name + enough contact info for a tooltip).
+const SUPPLIER_POPULATE = {
+  path: "suppliers.supplier",
+  select: "supplierName contactPerson contactDetails",
+};
+
+const isBlank = (v) => v === undefined || v === null || v === "";
+
+// Validates and cleans a `suppliers` payload ([{ supplier, costPrice,
+// leadTimeDays?, minOrderQty?, isPrimary? }]) and returns the array ready
+// to store. findOneAndUpdate / insertMany skip the model's pre("save")
+// guard, so the same rules (no duplicates, exactly one primary) are
+// enforced here — with proper 400s instead of a generic 500.
+const normalizeSuppliers = async (suppliers) => {
+  if (!Array.isArray(suppliers)) {
+    throw new ApiError(400, "Suppliers must be an array");
+  }
+
+  const seen = new Set();
+
+  const cleaned = suppliers.map((entry, index) => {
+    const row = `Supplier #${index + 1}`;
+
+    // Accept either an id or a populated { _id } object, so the client can
+    // send back exactly what a GET returned.
+    const rawId =
+      entry?.supplier && typeof entry.supplier === "object"
+        ? entry.supplier._id
+        : entry?.supplier;
+
+    if (!mongoose.Types.ObjectId.isValid(rawId)) {
+      throw new ApiError(400, `${row}: supplier ID invalid`);
+    }
+
+    const supplierId = String(rawId);
+    if (seen.has(supplierId)) {
+      throw new ApiError(400, "A product cannot list the same supplier twice");
+    }
+    seen.add(supplierId);
+
+    if (isBlank(entry.costPrice) || isNaN(Number(entry.costPrice))) {
+      throw new ApiError(400, `${row}: cost price is required`);
+    }
+    const costPrice = Number(entry.costPrice);
+    if (costPrice < 0) {
+      throw new ApiError(400, `${row}: cost price cannot be negative`);
+    }
+
+    const result = { supplier: supplierId, costPrice };
+
+    if (!isBlank(entry.leadTimeDays)) {
+      const leadTimeDays = Number(entry.leadTimeDays);
+      if (isNaN(leadTimeDays) || leadTimeDays < 0) {
+        throw new ApiError(400, `${row}: lead time must be 0 or more days`);
+      }
+      result.leadTimeDays = leadTimeDays;
+    }
+
+    if (!isBlank(entry.minOrderQty)) {
+      const minOrderQty = Number(entry.minOrderQty);
+      if (isNaN(minOrderQty) || minOrderQty < 1) {
+        throw new ApiError(
+          400,
+          `${row}: minimum order quantity must be at least 1`,
+        );
+      }
+      result.minOrderQty = minOrderQty;
+    }
+
+    result.isPrimary = entry.isPrimary === true;
+    return result;
+  });
+
+  if (cleaned.length > 0) {
+    const primaryCount = cleaned.filter((s) => s.isPrimary).length;
+    if (primaryCount > 1) {
+      throw new ApiError(400, "Only one supplier can be marked as primary");
+    }
+    // Same rule as the model: no explicit primary -> the first one is it.
+    if (primaryCount === 0) cleaned[0].isPrimary = true;
+
+    const found = await Supplier.find({ _id: { $in: [...seen] } }).select(
+      "_id",
+    );
+    if (found.length !== seen.size) {
+      const foundIds = new Set(found.map((s) => s._id.toString()));
+      const missing = [...seen].filter((id) => !foundIds.has(id));
+      throw new ApiError(404, `Supplier not found: ${missing.join(", ")}`);
+    }
+  }
+
+  return cleaned;
+};
 
 const createProduct = asyncHandler(async (req, res) => {
   const user = req.user;
@@ -29,7 +125,7 @@ const createProduct = asyncHandler(async (req, res) => {
     slug,
     price,
     discountPrice,
-    costPrice,
+    suppliers,
     category,
     stock,
     brand,
@@ -65,6 +161,11 @@ const createProduct = asyncHandler(async (req, res) => {
     throw new ApiError(404, `Brand with ID ${brand} not found`);
   }
 
+  // costPrice is no longer a stored field — it's a virtual derived from the
+  // primary supplier. Cost now arrives per supplier inside `suppliers`.
+  const normalizedSuppliers =
+    suppliers !== undefined ? await normalizeSuppliers(suppliers) : [];
+
   const duplicate = await Product.findOne({ $or: [{ title }, { slug }] });
 
   if (duplicate) {
@@ -88,7 +189,7 @@ const createProduct = asyncHandler(async (req, res) => {
     slug,
     price,
     discountPrice,
-    ...(costPrice !== undefined && { costPrice }),
+    suppliers: normalizedSuppliers,
     category,
     stock,
     brand,
@@ -106,6 +207,8 @@ const createProduct = asyncHandler(async (req, res) => {
   // Recompute status for every category this product was assigned to (and,
   // per Category.syncStatus, their ancestors too).
   await Category.syncStatus(newProduct.category);
+
+  await newProduct.populate(SUPPLIER_POPULATE);
 
   return res
     .status(201)
@@ -134,9 +237,11 @@ const addProductImages = asyncHandler(async (req, res) => {
   }
 
   const [product, store] = await Promise.all([
-    Product.findById(productId)
-      .populate("brand", "name")
-      .populate("category", "name"),
+    // No populate here — category/brand must stay raw ObjectIds. product.save()
+    // below fires a post("save") hook that passes doc.category straight into
+    // Category.syncStatus; populating this field would hand it full documents
+    // instead of ids.
+    Product.findById(productId),
     Store.findOne({ owner: user?._id }),
   ]);
 
@@ -165,8 +270,17 @@ const addProductImages = asyncHandler(async (req, res) => {
     );
   }
 
-  const categoryName = product.category?.[0]?.name || "uncategorized";
-  const brandName = product.brand?.name || "unbranded";
+  // Fetched separately (and .lean()) purely for the Cloudinary folder name —
+  // this must NOT touch product.category / product.brand themselves.
+  const [categoryDoc, brandDoc] = await Promise.all([
+    product.category?.[0]
+      ? Category.findById(product.category[0]).select("name").lean()
+      : null,
+    Brand.findById(product.brand).select("name").lean(),
+  ]);
+
+  const categoryName = categoryDoc?.name || "uncategorized";
+  const brandName = brandDoc?.name || "unbranded";
 
   const folder = [
     store.storeName,
@@ -190,6 +304,9 @@ const addProductImages = asyncHandler(async (req, res) => {
 
   product.images.push(...newImageUrls);
   await product.save();
+
+  // Populate only after save() — the save hooks need raw ids.
+  await product.populate(SUPPLIER_POPULATE);
 
   return res
     .status(200)
@@ -230,6 +347,7 @@ const deleteProductImage = asyncHandler(async (req, res) => {
 
   product.images = product.images.filter((url) => url !== imageUrl);
   await product.save();
+  await product.populate(SUPPLIER_POPULATE);
 
   return res
     .status(200)
@@ -266,6 +384,7 @@ const deleteAllProductImages = asyncHandler(async (req, res) => {
 
   product.images = [];
   await product.save();
+  await product.populate(SUPPLIER_POPULATE);
 
   return res
     .status(200)
@@ -285,7 +404,7 @@ const getProductById = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Product ID invalid");
   }
 
-  const product = await Product.findById(productID);
+  const product = await Product.findById(productID).populate(SUPPLIER_POPULATE);
 
   if (!product) {
     throw new ApiError(404, "Product not Found");
@@ -309,9 +428,9 @@ const getProductsByBrand = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Brand ID invalid");
   }
 
-  const products = await Product.find({ brand: brandId }).select(
-    "-ratingsAverage -ratingsCount -isActive",
-  );
+  const products = await Product.find({ brand: brandId })
+    .select("-ratingsAverage -ratingsCount -isActive")
+    .populate(SUPPLIER_POPULATE);
 
   if (products.length === 0) {
     throw new ApiError(404, "Products not found");
@@ -331,7 +450,7 @@ const getAllProducts = asyncHandler(async (req, res) => {
 
   // stockStatus and profit are schema virtuals (toJSON: { virtuals: true }),
   // so they're included automatically here — no extra selection needed.
-  const products = await Product.find();
+  const products = await Product.find().populate(SUPPLIER_POPULATE);
 
   if (products.length === 0) {
     throw new ApiError(404, "Products not found");
@@ -476,7 +595,8 @@ const getProductsByCategory = asyncHandler(async (req, res) => {
     category: { $in: categoryIds },
   })
     .populate("category", "name slug")
-    .populate("brand", "name logo");
+    .populate("brand", "name logo")
+    .populate(SUPPLIER_POPULATE);
 
   return res
     .status(200)
@@ -504,18 +624,24 @@ const addProductstoBrand = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Maximum 10 products can be added at once");
   }
 
-  const productsToInsert = products.map((product) => {
-    const imageCount = Array.isArray(product.images)
-      ? product.images.length
-      : 0;
-    const tooFewImages = imageCount < MIN_IMAGES;
+  // insertMany skips pre("save"), so each product's suppliers are validated
+  // and normalized here. Any legacy top-level costPrice is dropped.
+  const productsToInsert = await Promise.all(
+    products.map(async ({ costPrice, suppliers, ...product }) => {
+      const imageCount = Array.isArray(product.images)
+        ? product.images.length
+        : 0;
+      const tooFewImages = imageCount < MIN_IMAGES;
 
-    return {
-      ...product,
-      brand: brandId,
-      isActive: product.isActive === false ? false : !tooFewImages,
-    };
-  });
+      return {
+        ...product,
+        suppliers:
+          suppliers !== undefined ? await normalizeSuppliers(suppliers) : [],
+        brand: brandId,
+        isActive: product.isActive === false ? false : !tooFewImages,
+      };
+    }),
+  );
 
   const createdProducts = await Product.insertMany(productsToInsert);
 
@@ -683,11 +809,12 @@ const updateProduct = asyncHandler(async (req, res) => {
     slug,
     price,
     discountPrice,
-    costPrice,
     stock,
     isActive,
   } = req.body;
 
+  // Cost is managed per supplier via updateProductSuppliers — a top-level
+  // costPrice in the payload is intentionally ignored.
   if (!productId) throw new ApiError(400, "Product ID is required");
   if (!title) throw new ApiError(400, "Product title is required");
   if (!slug) throw new ApiError(400, "Product slug is required");
@@ -710,13 +837,12 @@ const updateProduct = asyncHandler(async (req, res) => {
         slug,
         price,
         discountPrice,
-        ...(costPrice !== undefined && { costPrice }),
         stock,
         ...(isActive !== undefined && { isActive }),
       },
     },
     { new: true, runValidators: true },
-  );
+  ).populate(SUPPLIER_POPULATE);
 
   if (!updatedProduct) {
     throw new ApiError(404, "Updating product failed");
@@ -725,6 +851,51 @@ const updateProduct = asyncHandler(async (req, res) => {
   return res
     .status(200)
     .json(new ApiResponse(200, updatedProduct, "Product updated successfully"));
+});
+
+// Replaces the product's whole supplier list in one call (an empty array
+// unlinks every supplier). The edit form sends its full list on save, the
+// same way updateFeatures / updateProductCategories work, so there's no
+// separate add/remove/set-primary endpoint to keep in sync.
+const updateProductSuppliers = asyncHandler(async (req, res) => {
+  const user = req.user;
+  if (!user) {
+    throw new ApiError(401, "Unauthorized");
+  }
+
+  const { productId, suppliers } = req.body;
+
+  if (!mongoose.Types.ObjectId.isValid(productId)) {
+    throw new ApiError(400, "Invalid product ID");
+  }
+
+  if (suppliers === undefined) {
+    throw new ApiError(400, "Suppliers array is required");
+  }
+
+  const normalizedSuppliers = await normalizeSuppliers(suppliers);
+
+  const updatedProduct = await Product.findByIdAndUpdate(
+    productId,
+    { $set: { suppliers: normalizedSuppliers } },
+    { new: true, runValidators: true },
+  )
+    .populate(SUPPLIER_POPULATE)
+    .select("-ratingsAverage -ratingsCount -isActive");
+
+  if (!updatedProduct) {
+    throw new ApiError(404, "Product not found");
+  }
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        updatedProduct,
+        "Product suppliers updated successfully",
+      ),
+    );
 });
 
 export {
@@ -742,4 +913,5 @@ export {
   updateProduct,
   updateProductCategories,
   updateProductBrand,
+  updateProductSuppliers,
 };

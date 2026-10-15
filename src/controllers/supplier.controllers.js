@@ -3,6 +3,7 @@ import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { Supplier } from "../models/supplier.models.js";
 import { Brand } from "../models/brands.models.js";
+import { Product } from "../models/products.models.js";
 import mongoose from "mongoose";
 
 const createSupplier = asyncHandler(async (req, res) => {
@@ -189,12 +190,35 @@ const getSupplierById = asyncHandler(async (req, res) => {
     "name slug logo",
   );
 
+  // Products this supplier provides, with the terms they offered on each.
+  const linkedProducts = await Product.find({
+    "suppliers.supplier": supplierId,
+  })
+    .select("title slug images suppliers")
+    .lean();
+
+  const products = linkedProducts.map((product) => {
+    const link = product.suppliers.find(
+      (s) => s.supplier.toString() === supplierId,
+    );
+    return {
+      _id: product._id,
+      title: product.title,
+      slug: product.slug,
+      image: product.images?.[0] || null,
+      costPrice: link.costPrice,
+      leadTimeDays: link.leadTimeDays ?? null,
+      minOrderQty: link.minOrderQty ?? null,
+      isPrimary: link.isPrimary,
+    };
+  });
+
   return res
     .status(200)
     .json(
       new ApiResponse(
         200,
-        { ...supplier.toObject(), brands },
+        { ...supplier.toObject(), brands, products },
         "Supplier retrieved successfully",
       ),
     );
@@ -225,6 +249,35 @@ const deleteSupplier = asyncHandler(async (req, res) => {
     { supplier: supplierId },
     { $set: { supplier: null } },
   );
+
+  // Same for products: remove this supplier from every product's supplier
+  // list. If it was a product's primary, promote the next remaining supplier
+  // so the "exactly one primary" rule still holds (findOneAndUpdate/bulkWrite
+  // skip the model's pre-save guard, so it has to be done here).
+  const affectedProducts = await Product.find({
+    "suppliers.supplier": supplierId,
+  }).select("suppliers");
+
+  if (affectedProducts.length > 0) {
+    await Product.bulkWrite(
+      affectedProducts.map((product) => {
+        const remaining = product.suppliers
+          .filter((s) => s.supplier.toString() !== supplierId)
+          .map((s) => s.toObject());
+
+        if (remaining.length > 0 && !remaining.some((s) => s.isPrimary)) {
+          remaining[0].isPrimary = true;
+        }
+
+        return {
+          updateOne: {
+            filter: { _id: product._id },
+            update: { $set: { suppliers: remaining } },
+          },
+        };
+      }),
+    );
+  }
 
   return res
     .status(200)
